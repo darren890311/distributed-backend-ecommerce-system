@@ -1,0 +1,101 @@
+### Credit Card Authorizer Tests
+### Base URL: http://localhost:8080
+
+### ==========================================
+### Test 1: Valid card - Should authorize 90% of the time (200) or decline 10% (402)
+### ==========================================
+POST http://localhost:8080/credit-card-authorizer/authorize
+Content-Type: application/json
+
+{
+  "credit_card_number": "1234-5678-9012-3456"
+}
+
+### ==========================================
+### Test 2: Invalid format - No dashes - Should return 400
+### ==========================================
+POST http://localhost:8080/credit-card-authorizer/authorize
+Content-Type: application/json
+
+{
+  "credit_card_number": "1234567890123456"
+}
+
+### ==========================================
+### Test 3: Invalid format - Wrong grouping - Should return 400
+### ==========================================
+POST http://localhost:8080/credit-card-authorizer/authorize
+Content-Type: application/json
+
+{
+  "credit_card_number": "123-4567-8901-23456"
+}
+
+### ==========================================
+### Test 4: Invalid format - Spaces instead of dashes - Should return 400
+### ==========================================
+POST http://localhost:8080/credit-card-authorizer/authorize
+Content-Type: application/json
+
+{
+  "credit_card_number": "1234 5678 9012 3456"
+}
+
+### ==========================================
+### Test 5: Invalid format - Missing digits - Should return 400
+### ==========================================
+POST http://localhost:8080/credit-card-authorizer/authorize
+Content-Type: application/json
+
+{
+  "credit_card_number": "1234-5678-9012-345"
+}
+
+### ==========================================
+### Test 6: Invalid format - Letters included - Should return 400
+### ==========================================
+POST http://localhost:8080/credit-card-authorizer/authorize
+Content-Type: application/json
+
+{
+  "credit_card_number": "1234-5678-ABCD-3456"
+}
+
+### ==========================================
+### Test 7: Null card number - Should return 400
+### ==========================================
+POST http://localhost:8080/credit-card-authorizer/authorize
+Content-Type: application/json
+
+{
+  "credit_card_number": null
+}
+
+### ==========================================
+### Test 8: Missing field - Should return 400
+### ==========================================
+POST http://localhost:8080/credit-card-authorizer/authorize
+Content-Type: application/json
+
+{
+}
+
+### ==========================================
+### Test 9: Different valid card - Run this 10 times to verify 90/10 split
+### ==========================================
+POST http://localhost:8080/credit-card-authorizer/authorize
+Content-Type: application/json
+
+{
+  "credit_card_number": "9999-8888-7777-6666"
+}
+
+### ==========================================
+### Test 10: Edge case - All zeros
+### ==========================================
+POST http://localhost:8080/credit-card-authorizer/authorize
+Content-Type: application/json
+
+{
+  "credit_card_number": "0000-0000-0000-0000"
+}
