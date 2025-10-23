@@ -1,0 +1,91 @@
+### Product Service Tests
+### Base URL: http://localhost:8082
+
+### ==========================================
+### Test 1: Create a product (should return 201)
+### ==========================================
+POST http://localhost:8082/products
+Content-Type: application/json
+
+{
+  "product_id": 1,
+  "sku": "LAPTOP-001",
+  "manufacturer": "Dell Technologies",
+  "category_id": 1,
+  "weight": 2500,
+  "some_other_id": 100
+}
+
+### ==========================================
+### Test 2: Get product by ID (replace {id} with ID from Test 1)
+### ==========================================
+GET http://localhost:8082/products/1
+
+### ==========================================
+### Test 3: Get non-existent product (should return 404)
+### ==========================================
+GET http://localhost:8082/products/999
+
+### ==========================================
+### Test 4: Create another product
+### ==========================================
+POST http://localhost:8082/products
+Content-Type: application/json
+
+{
+  "product_id": 999,
+  "sku": "MOUSE-001",
+  "manufacturer": "Logitech",
+  "category_id": 2,
+  "weight": 120,
+  "some_other_id": 200
+}
+
+### ==========================================
+### Test 5: Enable bad mode (10% of requests will fail with 503)
+### ==========================================
+GET http://localhost:8082/products/bad-mode?enabled=true
+
+### ==========================================
+### Test 6: Create product with bad mode enabled
+### Run this 10 times - ~1 should fail with 503
+### ==========================================
+POST http://localhost:8082/products
+Content-Type: application/json
+
+{
+  "product_id": 1,
+  "sku": "KEYBOARD-001",
+  "manufacturer": "Corsair",
+  "category_id": 2,
+  "weight": 950,
+  "some_other_id": 300
+}
+
+### ==========================================
+### Test 7: Disable bad mode
+### ==========================================
+GET http://localhost:8082/products/bad-mode?enabled=false
+
+### ==========================================
+### Test 8: Create product with all required fields
+### ==========================================
+POST http://localhost:8082/products
+Content-Type: application/json
+
+{
+  "product_id": 1,
+  "sku": "MONITOR-001",
+  "manufacturer": "Samsung",
+  "category_id": 3,
+  "weight": 5500,
+  "some_other_id": 400
+}
+
+### ==========================================
+### Test 9: Access H2 Console (in browser)
+### ==========================================
+# http://localhost:8082/h2-console
+# JDBC URL: jdbc:h2:mem:productdb
+# Username: sa
+# Password: (leave empty)
