@@ -1,0 +1,40 @@
+###  Create Products
+POST http://localhost:8082/products
+Content-Type: application/json
+
+{
+  "product_id": 1,
+  "sku": "LAPTOP-001",
+  "manufacturer": "Dell",
+  "category_id": 1,
+  "weight": 2500,
+  "some_other_id": 100
+}
+
+### Create Shopping Cart
+
+POST http://localhost:8084/shopping-cart
+Content-Type: application/json
+
+{
+  "customer_id": 12345
+}
+
+
+### Add Product to Cart
+POST http://localhost:8084/shopping-carts/1/addItem
+Content-Type: application/json
+
+{
+  "product_id": 1,
+  "quantity": 2
+}
+
+### Checkout Cart
+POST http://localhost:8084/shopping-carts/1/checkout
+Content-Type: application/json
+
+{
+  "credit_card_number": "1234-5678-9012-3456"
+}
+

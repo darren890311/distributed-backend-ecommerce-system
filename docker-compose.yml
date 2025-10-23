@@ -44,6 +44,33 @@ services:
       credit-card-authorizer:
         condition: service_started
 
+  # Shopping Cart Service
+  shopping-cart-service:
+    build:
+      context: .
+      dockerfile: shopping-cart-service/Dockerfile
+    container_name: shopping-cart-service
+    ports:
+      - "8084:8084"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - SERVICES_PRODUCT_URL=http://product-service:8082
+      - SERVICES_CREDIT_CARD_AUTHORIZER_URL=http://credit-card-authorizer:8080
+    networks:
+      - ecommerce-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8084/actuator/health || exit 1"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    depends_on:
+      product-service:
+        condition: service_started
+      credit-card-authorizer:
+        condition: service_started
+
 # Shared network for inter-service communication
 networks:
   ecommerce-network:
