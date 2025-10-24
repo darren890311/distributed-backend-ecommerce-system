@@ -56,6 +56,10 @@ services:
       - SPRING_PROFILES_ACTIVE=docker
       - SERVICES_PRODUCT_URL=http://product-service:8082
       - SERVICES_CREDIT_CARD_AUTHORIZER_URL=http://credit-card-authorizer:8080
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USERNAME=guest
+      - RABBITMQ_PASSWORD=guest
     networks:
       - ecommerce-network
     healthcheck:
@@ -70,6 +74,8 @@ services:
         condition: service_started
       credit-card-authorizer:
         condition: service_started
+      rabbitmq:
+        condition: service_healthy
 
   # RabbitMQ (for messaging between ShoppingCart and Warehouse)
   rabbitmq:
