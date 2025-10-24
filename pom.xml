@@ -14,6 +14,7 @@
 		<module>credit-card-authorizer</module>
 		<module>product-service</module>
 		<module>shopping-cart-service</module>
+		<module>warehouse-service</module>
 	</modules>
 
 	<properties>

@@ -71,6 +71,41 @@ services:
       credit-card-authorizer:
         condition: service_started
 
+  # RabbitMQ (for messaging between ShoppingCart and Warehouse)
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq
+    ports:
+      - "5672:5672"     # messaging port
+      - "15672:15672"   # management UI
+    networks:
+      - ecommerce-network
+    healthcheck:
+      test: [ "CMD", "rabbitmq-diagnostics", "ping" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  # Warehouse Service
+  warehouse-service:
+    build:
+      context: .
+      dockerfile: warehouse-service/Dockerfile
+    container_name: warehouse-service
+    ports:
+      - "8083:8080"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - SPRING_RABBITMQ_HOST=rabbitmq
+      - SPRING_RABBITMQ_PORT=5672
+    networks:
+      - ecommerce-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
 # Shared network for inter-service communication
 networks:
   ecommerce-network:
