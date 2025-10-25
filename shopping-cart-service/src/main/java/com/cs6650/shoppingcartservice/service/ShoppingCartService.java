@@ -16,7 +16,13 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestTemplate;
 
+import com.cs6650.shoppingcartservice.config.RabbitMQConfig;
+import com.cs6650.shoppingcartservice.dto.OrderMessage;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
+
 import java.util.Optional;
+import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * Business logic for Shopping Cart operations
@@ -30,6 +36,7 @@ public class ShoppingCartService {
   private final ShoppingCartRepository cartRepository;
   private final CartItemRepository cartItemRepository;
   private final RestTemplate restTemplate;
+  private final RabbitTemplate rabbitTemplate;
 
   @Value("${services.product.url}")
   private String productServiceUrl;
@@ -106,6 +113,7 @@ public class ShoppingCartService {
    * Checkout cart
    * - Validates cart exists and is active
    * - Calls Credit Card Authorizer to process payment
+   * - Publishes order to RabbitMQ for warehouse
    * - Marks cart as checked out
    * - Returns order ID
    */
@@ -135,6 +143,16 @@ public class ShoppingCartService {
       throw new PaymentDeclinedException("Payment was declined");
     }
 
+    // Publish to RabbitMQ
+    try {
+      publishOrderToWarehouse(cart);
+      log.info("Order published to warehouse queue for cart: {}", cartId);
+    } catch (Exception e) {
+      log.error("Failed to publish order to warehouse: {}", e.getMessage());
+      // You could decide whether to fail the checkout or just log the error
+      // For now, we'll continue and mark cart as checked out
+    }
+
     // Mark cart as checked out
     cart.setStatus(ShoppingCartEntity.CartStatus.CHECKED_OUT);
     cartRepository.save(cart);
@@ -143,6 +161,30 @@ public class ShoppingCartService {
 
     // Return cart ID as order ID
     return cartId;
+  }
+
+  /**
+   * Publish order to RabbitMQ for warehouse processing
+   */
+  private void publishOrderToWarehouse(ShoppingCartEntity cart) {
+    // Convert cart items to order message format
+    List<OrderMessage.ProductItem> products = cart.getItems().stream()
+        .map(item -> new OrderMessage.ProductItem(
+            item.getProductId(),
+            item.getQuantity()
+        ))
+        .collect(Collectors.toList());
+
+    OrderMessage orderMessage = new OrderMessage(
+        cart.getShoppingCartId(),
+        products
+    );
+
+    // Publish to RabbitMQ
+    rabbitTemplate.convertAndSend(RabbitMQConfig.CHECKOUT_QUEUE, orderMessage);
+
+    log.info("Published order {} to queue with {} products",
+        cart.getShoppingCartId(), products.size());
   }
 
   /**
