@@ -31,3 +31,12 @@ build/
 
 ### VS Code ###
 .vscode/
+
+# Load testing outputs
+load-testing-client/load_test_*.csv
+load-testing-client/load_test_*.txt
+load-testing-client/test-results/
+
+# OS
+.DS_Store
+.DS_Store?

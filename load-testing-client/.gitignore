@@ -1,0 +1,50 @@
+# Maven build output
+target/
+*.jar
+*.war
+*.ear
+*.class
+
+# Test output files - DON'T commit these
+load_test_metrics.csv
+load_test_results.txt
+*.csv
+*.txt
+
+# Test results directories
+test-results/
+results_*/
+metrics_*/
+
+# IDE files
+.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Maven wrapper (optional - some teams keep this)
+.mvn/wrapper/maven-wrapper.jar
+
+# Logs
+*.log
+
+# Operating System Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Compiled Python files (if any scripts)
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Temporary files
+*.tmp
+*.temp
