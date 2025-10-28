@@ -1,0 +1,77 @@
+# Example Terraform Variables Configuration
+# Copy this file to terraform.tfvars and update with your actual values
+
+# AWS Configuration
+aws_region  = "us-east-1"
+environment = "dev"
+
+# Network Configuration
+vpc_id             = "vpc-0123456789abcdef0"  # Replace with your VPC ID
+public_subnet_ids  = [
+  "subnet-0123456789abcdef0",  # Availability Zone 1
+  "subnet-0123456789abcdef1",  # Availability Zone 2
+]
+
+# ALB Configuration
+enable_deletion_protection = false  # Set to true for production
+
+# SSL Certificate (optional - for HTTPS)
+# ssl_certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/12345678-1234-1234-1234-123456789012"
+
+# Product Service Targets (Port 8082)
+# Using automatic target weights (weight = null)
+product_service_targets = [
+  {
+    id     = "i-0123456789abcdef0"  # EC2 Instance ID
+    port   = 8082
+    weight = null  # Automatic weight adjustment by AWS
+  },
+  {
+    id     = "i-0123456789abcdef1"
+    port   = 8082
+    weight = null
+  },
+  {
+    id     = "i-0123456789abcdef2"
+    port   = 8082
+    weight = null
+  },
+]
+
+# Shopping Cart Service Targets (Port 8084)
+# Using automatic target weights
+shopping_cart_service_targets = [
+  {
+    id     = "i-1123456789abcdef0"
+    port   = 8084
+    weight = null  # Automatic weight
+  },
+  {
+    id     = "i-1123456789abcdef1"
+    port   = 8084
+    weight = null
+  },
+]
+
+# Credit Card Service Targets (Port 8080)
+# Mix of automatic and manual weights
+credit_card_service_targets = [
+  {
+    id     = "i-2123456789abcdef0"
+    port   = 8080
+    weight = null  # Automatic weight
+  },
+  {
+    id     = "i-2123456789abcdef1"
+    port   = 8080
+    weight = 100   # Manual weight (for testing or specific requirements)
+  },
+]
+
+# Common Tags
+common_tags = {
+  Project     = "cs6650-assignment3"
+  ManagedBy   = "Terraform"
+  Owner       = "YourName"
+  CostCenter  = "Engineering"
+}

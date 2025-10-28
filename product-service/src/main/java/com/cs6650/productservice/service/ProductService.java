@@ -21,7 +21,13 @@ public class ProductService {
 
   private final ProductRepository productRepository;
   private final Random random = new Random();
-  private static final double ERROR_RATE = 0.1;
+
+  // Error rate can be configured via environment variable
+  // Default: 0.1 (10%)
+  // For 50% failure simulation, set PRODUCT_SERVICE_ERROR_RATE=0.5
+  private double errorRate = Double.parseDouble(
+      System.getenv().getOrDefault("PRODUCT_SERVICE_ERROR_RATE", "0.1")
+  );
 
   private boolean badMode = false;
 
@@ -32,8 +38,8 @@ public class ProductService {
     log.info("Creating product: {}", product.getSku());
 
     // Simulate bad behavior if enabled
-    if (badMode && random.nextDouble() < ERROR_RATE) {
-      log.error("BAD MODE: Simulating service unavailable");
+    if (badMode && random.nextDouble() < errorRate) {
+      log.error("BAD MODE: Simulating service unavailable (error rate: {}%)", (int)(errorRate * 100));
       throw new ServiceUnavailableException("Service temporarily unavailable");
     }
 
@@ -57,8 +63,8 @@ public class ProductService {
     log.info("Fetching product: {}", productId);
 
     // Simulate bad behavior if enabled
-    if (badMode && random.nextDouble() < ERROR_RATE) {
-      log.error("BAD MODE: Simulating service unavailable");
+    if (badMode && random.nextDouble() < errorRate) {
+      log.error("BAD MODE: Simulating service unavailable (error rate: {}%)", (int)(errorRate * 100));
       throw new ServiceUnavailableException("Service temporarily unavailable");
     }
 
@@ -70,11 +76,27 @@ public class ProductService {
    */
   public void setBadMode(boolean enabled) {
     this.badMode = enabled;
-    log.info("Bad mode {}", enabled ? "ENABLED" : "DISABLED");
+    log.info("Bad mode {} (error rate: {}%)",
+        enabled ? "ENABLED" : "DISABLED", (int)(errorRate * 100));
   }
 
   public boolean isBadMode() {
     return badMode;
+  }
+
+  /**
+   * Set custom error rate (0.0 to 1.0)
+   */
+  public void setErrorRate(double rate) {
+    if (rate < 0.0 || rate > 1.0) {
+      throw new IllegalArgumentException("Error rate must be between 0.0 and 1.0");
+    }
+    this.errorRate = rate;
+    log.info("Error rate set to {}%", (int)(rate * 100));
+  }
+
+  public double getErrorRate() {
+    return errorRate;
   }
 
   /**

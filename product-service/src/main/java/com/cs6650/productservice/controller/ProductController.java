@@ -119,14 +119,46 @@ public class ProductController implements ProductApi {
 
   /**
    * Toggle bad mode (for testing)
-   * GET /products/bad-mode?enabled=true
+   * GET /products/bad-mode?enabled=true&errorRate=0.5
    */
   @GetMapping("/products/bad-mode")
-  public ResponseEntity<String> toggleBadMode(@RequestParam("enabled") boolean enabled) {
+  public ResponseEntity<String> toggleBadMode(
+      @RequestParam("enabled") boolean enabled,
+      @RequestParam(value = "errorRate", required = false) Double errorRate) {
+
+    // Set error rate if provided
+    if (errorRate != null) {
+      try {
+        productService.setErrorRate(errorRate);
+      } catch (IllegalArgumentException e) {
+        return ResponseEntity.badRequest().body(e.getMessage());
+      }
+    }
+
+    // Enable/disable bad mode
     productService.setBadMode(enabled);
-    String message = "Bad mode " + (enabled ? "ENABLED" : "DISABLED") +
-        " (10% of requests will return 503)";
+
+    String message = String.format(
+        "Bad mode %s (%d%% of requests will return 503)",
+        enabled ? "ENABLED" : "DISABLED",
+        (int)(productService.getErrorRate() * 100)
+    );
+
     log.info(message);
     return ResponseEntity.ok(message);
+  }
+
+  /**
+   * Get current bad mode status
+   * GET /products/bad-mode/status
+   */
+  @GetMapping("/products/bad-mode/status")
+  public ResponseEntity<String> getBadModeStatus() {
+    String status = String.format(
+        "Bad mode: %s, Error rate: %d%%",
+        productService.isBadMode() ? "ENABLED" : "DISABLED",
+        (int)(productService.getErrorRate() * 100)
+    );
+    return ResponseEntity.ok(status);
   }
 }

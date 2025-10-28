@@ -1,0 +1,140 @@
+version: '3.8'
+
+# Docker Compose configuration for testing Product Service with 50% failure rate
+# This simulates a degraded service for testing ALB automatic target weights and failover
+
+services:
+  # Product Service - Normal Instance (0% failure)
+  product-service-normal:
+    build:
+      context: .
+      dockerfile: product-service/Dockerfile
+    container_name: product-service-normal
+    ports:
+      - "8082:8082"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - PRODUCT_SERVICE_ERROR_RATE=0.0  # No failures
+    networks:
+      - ecommerce-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8082/actuator/health || exit 1"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
+  # Product Service - Failing Instance (50% failure rate)
+  product-service-failing:
+    build:
+      context: .
+      dockerfile: product-service/Dockerfile
+    container_name: product-service-failing
+    ports:
+      - "8092:8082"  # Different host port
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - PRODUCT_SERVICE_ERROR_RATE=0.5  # 50% failure rate
+    networks:
+      - ecommerce-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8082/actuator/health || exit 1"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
+  # Credit Card Authorizer Service
+  credit-card-authorizer:
+    build:
+      context: .
+      dockerfile: credit-card-authorizer/Dockerfile
+    container_name: credit-card-authorizer
+    ports:
+      - "8080:8080"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+    networks:
+      - ecommerce-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/actuator/health || exit 1"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
+  # Shopping Cart Service
+  shopping-cart-service:
+    build:
+      context: .
+      dockerfile: shopping-cart-service/Dockerfile
+    container_name: shopping-cart-service
+    ports:
+      - "8084:8084"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - SERVICES_PRODUCT_URL=http://product-service-normal:8082
+      - SERVICES_CREDIT_CARD_AUTHORIZER_URL=http://credit-card-authorizer:8080
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USERNAME=guest
+      - RABBITMQ_PASSWORD=guest
+    networks:
+      - ecommerce-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8084/actuator/health || exit 1"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    depends_on:
+      product-service-normal:
+        condition: service_started
+      credit-card-authorizer:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+
+  # RabbitMQ
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    networks:
+      - ecommerce-network
+    healthcheck:
+      test: [ "CMD", "rabbitmq-diagnostics", "ping" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  # Warehouse Service
+  warehouse-service:
+    build:
+      context: .
+      dockerfile: warehouse-service/Dockerfile
+    container_name: warehouse-service
+    ports:
+      - "8083:8080"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - SPRING_RABBITMQ_HOST=rabbitmq
+      - SPRING_RABBITMQ_PORT=5672
+    networks:
+      - ecommerce-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
+networks:
+  ecommerce-network:
+    driver: bridge
+    name: ecommerce-network
