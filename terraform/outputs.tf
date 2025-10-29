@@ -172,3 +172,106 @@ output "test_commands" {
     aws elbv2 describe-target-health --target-group-arn ${aws_lb_target_group.credit_card_service_tg.arn}
   EOT
 }
+
+# ============================================================================
+# RabbitMQ Outputs
+# ============================================================================
+
+output "rabbitmq_instance_id" {
+  description = "EC2 Instance ID of the RabbitMQ server"
+  value       = aws_instance.rabbitmq.id
+}
+
+output "rabbitmq_private_ip" {
+  description = "Private IP address of the RabbitMQ server"
+  value       = aws_instance.rabbitmq.private_ip
+}
+
+output "rabbitmq_public_ip" {
+  description = "Public IP address of the RabbitMQ server (if applicable)"
+  value       = aws_instance.rabbitmq.public_ip
+}
+
+output "rabbitmq_eip" {
+  description = "Elastic IP address of the RabbitMQ server (if enabled)"
+  value       = var.use_rabbitmq_eip ? aws_eip.rabbitmq_eip[0].public_ip : null
+}
+
+output "rabbitmq_amqp_endpoint" {
+  description = "RabbitMQ AMQP endpoint (use private IP for VPC-internal access)"
+  value       = "${aws_instance.rabbitmq.private_ip}:5672"
+}
+
+output "rabbitmq_management_url" {
+  description = "RabbitMQ Management Console URL"
+  value       = "http://${var.use_rabbitmq_eip ? aws_eip.rabbitmq_eip[0].public_ip : aws_instance.rabbitmq.public_ip}:15672"
+}
+
+output "rabbitmq_security_group_id" {
+  description = "Security Group ID for the RabbitMQ server"
+  value       = aws_security_group.rabbitmq_sg.id
+}
+
+output "warehouse_service_sg_id" {
+  description = "Security Group ID for Warehouse Service instances"
+  value       = aws_security_group.warehouse_service_sg.id
+}
+
+output "rabbitmq_connection_string" {
+  description = "RabbitMQ connection string for services (use private IP)"
+  value       = "amqp://${var.rabbitmq_username}:${var.rabbitmq_password}@${aws_instance.rabbitmq.private_ip}:5672/"
+  sensitive   = true
+}
+
+# ============================================================================
+# RabbitMQ Configuration Summary
+# ============================================================================
+
+output "rabbitmq_summary" {
+  description = "Summary of RabbitMQ deployment configuration"
+  value = {
+    instance_id         = aws_instance.rabbitmq.id
+    instance_type       = var.rabbitmq_instance_type
+    private_ip          = aws_instance.rabbitmq.private_ip
+    amqp_port          = 5672
+    management_port    = 15672
+    has_elastic_ip     = var.use_rabbitmq_eip
+    cloudwatch_alarms  = var.enable_cloudwatch_alarms
+  }
+}
+
+# ============================================================================
+# Service Connection Instructions
+# ============================================================================
+
+output "service_configuration_instructions" {
+  description = "Instructions for configuring services to connect to RabbitMQ"
+  value = <<-EOT
+    # Environment Variables for Shopping Cart Service
+    export RABBITMQ_HOST="${aws_instance.rabbitmq.private_ip}"
+    export RABBITMQ_PORT="5672"
+    export RABBITMQ_USERNAME="${var.rabbitmq_username}"
+    export RABBITMQ_PASSWORD="${var.rabbitmq_password}"
+
+    # Environment Variables for Warehouse Service
+    export SPRING_RABBITMQ_HOST="${aws_instance.rabbitmq.private_ip}"
+    export SPRING_RABBITMQ_PORT="5672"
+    export SPRING_RABBITMQ_USERNAME="${var.rabbitmq_username}"
+    export SPRING_RABBITMQ_PASSWORD="${var.rabbitmq_password}"
+
+    # Access RabbitMQ Management Console
+    Management URL: http://${var.use_rabbitmq_eip ? aws_eip.rabbitmq_eip[0].public_ip : aws_instance.rabbitmq.public_ip}:15672
+    Username: ${var.rabbitmq_username}
+    Password: ${var.rabbitmq_password}
+
+    # SSH into RabbitMQ Server
+    ssh -i <your-key.pem> ec2-user@${var.use_rabbitmq_eip ? aws_eip.rabbitmq_eip[0].public_ip : aws_instance.rabbitmq.public_ip}
+
+    # Check RabbitMQ Status
+    ssh -i <your-key.pem> ec2-user@${var.use_rabbitmq_eip ? aws_eip.rabbitmq_eip[0].public_ip : aws_instance.rabbitmq.public_ip} "sudo rabbitmqctl status"
+
+    # List Queues
+    ssh -i <your-key.pem> ec2-user@${var.use_rabbitmq_eip ? aws_eip.rabbitmq_eip[0].public_ip : aws_instance.rabbitmq.public_ip} "sudo rabbitmqctl list_queues"
+  EOT
+  sensitive = true
+}
