@@ -110,3 +110,85 @@ variable "common_tags" {
     ManagedBy = "Terraform"
   }
 }
+
+# ============================================
+# RabbitMQ Configuration Variables
+# ============================================
+
+variable "rabbitmq_instance_type" {
+  description = "EC2 instance type for RabbitMQ server"
+  type        = string
+  default     = "t3.medium" # 2 vCPU, 4 GB RAM - suitable for moderate message traffic
+}
+
+variable "rabbitmq_ami_id" {
+  description = "AMI ID for RabbitMQ EC2 instance. If empty, uses latest Amazon Linux 2023"
+  type        = string
+  default     = ""
+}
+
+variable "rabbitmq_subnet_id" {
+  description = "Subnet ID where RabbitMQ instance will be deployed (should be private subnet)"
+  type        = string
+}
+
+variable "key_name" {
+  description = "EC2 Key Pair name for SSH access to instances"
+  type        = string
+}
+
+variable "rabbitmq_username" {
+  description = "Username for RabbitMQ administrator"
+  type        = string
+  default     = "admin"
+  sensitive   = true
+}
+
+variable "rabbitmq_password" {
+  description = "Password for RabbitMQ administrator"
+  type        = string
+  sensitive   = true
+}
+
+variable "use_rabbitmq_eip" {
+  description = "Whether to assign an Elastic IP to RabbitMQ instance for stable endpoint"
+  type        = bool
+  default     = false
+}
+
+variable "rabbitmq_volume_size" {
+  description = "Size of root volume for RabbitMQ instance in GB"
+  type        = number
+  default     = 20
+}
+
+variable "enable_detailed_monitoring" {
+  description = "Enable detailed CloudWatch monitoring for RabbitMQ instance"
+  type        = bool
+  default     = false
+}
+
+variable "enable_cloudwatch_alarms" {
+  description = "Enable CloudWatch alarms for RabbitMQ instance"
+  type        = bool
+  default     = true
+}
+
+variable "sns_topic_arn" {
+  description = "SNS topic ARN for CloudWatch alarm notifications"
+  type        = string
+  default     = ""
+}
+
+variable "monitoring_cidr_blocks" {
+  description = "CIDR blocks allowed to access RabbitMQ Prometheus metrics endpoint"
+  type        = list(string)
+  default     = []
+}
+
+# Warehouse Service Configuration
+variable "warehouse_service_instance_ids" {
+  description = "List of EC2 instance IDs running Warehouse Service"
+  type        = list(string)
+  default     = []
+}
