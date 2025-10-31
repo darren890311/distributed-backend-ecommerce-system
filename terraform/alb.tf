@@ -79,8 +79,8 @@ resource "aws_lb_target_group" "product_service_tg" {
   # Health check configuration
   health_check {
     enabled             = true
-    healthy_threshold   = 3
-    unhealthy_threshold = 3
+    healthy_threshold   = 2
+    unhealthy_threshold = 2
     timeout             = 5
     interval            = 30
     path                = "/actuator/health"
@@ -115,8 +115,8 @@ resource "aws_lb_target_group" "shopping_cart_service_tg" {
   # Health check configuration
   health_check {
     enabled             = true
-    healthy_threshold   = 3
-    unhealthy_threshold = 3
+    healthy_threshold   = 2
+    unhealthy_threshold = 2
     timeout             = 5
     interval            = 30
     path                = "/actuator/health"
@@ -151,8 +151,8 @@ resource "aws_lb_target_group" "credit_card_service_tg" {
   # Health check configuration
   health_check {
     enabled             = true
-    healthy_threshold   = 3
-    unhealthy_threshold = 3
+    healthy_threshold   = 2
+    unhealthy_threshold = 2
     timeout             = 5
     interval            = 30
     path                = "/actuator/health"
