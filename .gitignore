@@ -32,22 +32,11 @@ build/
 ### VS Code ###
 .vscode/
 
-### macOS ###
+# Load testing outputs
+load-testing-client/load_test_*.csv
+load-testing-client/load_test_*.txt
+load-testing-client/test-results/
+
+# OS
 .DS_Store
-.AppleDouble
-.LSOverride
-
-### Terraform ###
-*.tfstate
-*.tfstate.*
-*.tfvars
-!terraform.tfvars.example
-.terraform/
-.terraform.lock.hcl
-crash.log
-crash.*.log
-override.tf
-override.tf.json
-*_override.tf
-*_override.tf.json
-
+.DS_Store?
