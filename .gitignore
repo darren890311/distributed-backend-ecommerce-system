@@ -40,3 +40,11 @@ load-testing-client/test-results/
 # OS
 .DS_Store
 .DS_Store?
+
+
+# Terraform local state / provider cache
+terraform/.terraform/
+terraform/.terraform.lock.hcl
+terraform/terraform.tfstate
+terraform/terraform.tfstate.backup
+terraform/*.tfvars
