@@ -41,6 +41,7 @@ resource "aws_security_group" "product_service_sg" {
   }
 }
 
+
 # Security Group for Credit Card Authorizer Service Instances (Port 8080)
 resource "aws_security_group" "credit_card_service_sg" {
   name        = "credit-card-authorizer-instances-sg"

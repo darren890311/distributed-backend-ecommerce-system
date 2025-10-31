@@ -32,6 +32,7 @@ variable "enable_deletion_protection" {
   default     = false
 }
 
+
 variable "management_cidr_blocks" {
   description = "CIDR blocks allowed to SSH into instances for management"
   type        = list(string)
@@ -131,12 +132,14 @@ variable "common_tags" {
   }
 }
 
+
 # SNS topic for alarms (optional)
 variable "sns_topic_arn" {
   description = "SNS topic ARN for CloudWatch alarm notifications"
   type        = string
   default     = ""
 }
+
 
 # Monitoring CIDR blocks
 variable "monitoring_cidr_blocks" {
@@ -165,6 +168,7 @@ variable "enable_detailed_monitoring" {
   type        = bool
   default     = false
 }
+
 
 # SSL certificate
 variable "ssl_certificate_arn" {
