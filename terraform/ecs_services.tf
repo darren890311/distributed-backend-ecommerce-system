@@ -42,6 +42,7 @@ resource "aws_ecs_service" "product_service_failing" {
     assign_public_ip = true
   }
 
+
   load_balancer {
     target_group_arn = aws_lb_target_group.product_service_tg.arn
     container_name   = "product-service-failing"
@@ -66,7 +67,8 @@ resource "aws_ecs_service" "shopping_cart_service" {
 
   network_configuration {
     subnets          = var.public_subnet_ids
-    security_groups  = [aws_security_group.shopping_cart_service_sg.id]
+    security_groups  = [
+      aws_security_group.shopping_cart_service_sg.id ]
     assign_public_ip = true
   }
 
@@ -97,9 +99,11 @@ resource "aws_ecs_service" "credit_card_authorizer" {
 
   network_configuration {
     subnets          = var.public_subnet_ids
-    security_groups  = [aws_security_group.credit_card_service_sg.id]
+    security_groups  = [
+      aws_security_group.credit_card_service_sg.id]
     assign_public_ip = true
   }
+
 
   load_balancer {
     target_group_arn = aws_lb_target_group.credit_card_service_tg.arn

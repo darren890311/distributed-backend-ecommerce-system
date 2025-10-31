@@ -150,6 +150,27 @@ resource "aws_ecs_task_definition" "shopping_cart_service" {
         {
           name  = "RABBITMQ_PASSWORD"
           value = var.rabbitmq_password
+        },
+        # IMPORTANT: Service IPs below are session-specific and must be updated
+        # after each AWS Learner Lab restart. These IPs are for direct
+        # container-to-container communication within the VPC.
+        #
+        # To get new IPs after 'terraform apply':
+        # 1. Wait for services to start (~3 min)
+        # 2. Run: ./get-service-ips.sh (see RESTART_GUIDE.md)
+        # 3. Update these values
+        # 4. Run: terraform apply
+        # 5. Restart shopping-cart-service
+        #
+        # AWS Learner Lab limitation: Service Discovery not available,
+        # so we use direct IP addressing as workaround.
+        {
+          name  = "SERVICES_PRODUCT_URL"
+          value = "http://172.31.16.160:8082"
+        },
+        {
+          name  = "SERVICES_CREDIT_CARD_AUTHORIZER_URL"
+          value = "http://172.31.12.110:8080"
         }
       ]
 
@@ -253,6 +274,22 @@ resource "aws_ecs_task_definition" "warehouse_service" {
         {
           name  = "SPRING_RABBITMQ_PASSWORD"
           value = var.rabbitmq_password
+        },
+        {
+          name  = "SERVICES_PRODUCT_URL"
+          value = "http://172.31.16.160:8082"
+        },
+        {
+          name  = "SPRING_RABBITMQ_LISTENER_SIMPLE_CONCURRENCY"
+          value = "8"
+        },
+        {
+          name  = "SPRING_RABBITMQ_LISTENER_SIMPLE_MAX_CONCURRENCY"
+          value = "16"
+        },
+        {
+          name  = "SPRING_RABBITMQ_LISTENER_SIMPLE_PREFETCH"
+          value = "250"
         }
       ]
 

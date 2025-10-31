@@ -25,7 +25,10 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public class LoadTestingClient {
 
-  private static final int PRODUCT_POOL_SIZE = 1000;  // Pre-create 1000 products
+  // Configuration: Reduced to 1 product for RabbitMQ performance testing
+  // The assignment focuses on queue management, not product variety
+  // Using a single product minimizes setup time while fully testing RabbitMQ throughput
+  private static final int PRODUCT_POOL_SIZE = 1;
 
   public static void main(String[] args) {
     System.out.println("=== CS6650 Assignment 3 - Load Testing Client ===\n");
@@ -153,7 +156,7 @@ public class LoadTestingClient {
     // Progress monitoring thread
     Thread progressThread = new Thread(() -> {
       try {
-        while (!completionLatch.await(5, TimeUnit.SECONDS)) {
+        while (!completionLatch.await(30, TimeUnit.SECONDS)) {
           int completed = successCounter.get() + failureCounter.get();
           double progress = (completed * 100.0) / totalCheckouts;
           System.out.printf("Progress: %d/%d checkouts (%.1f%%)\n",

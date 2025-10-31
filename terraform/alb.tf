@@ -76,6 +76,8 @@ resource "aws_lb_target_group" "product_service_tg" {
   protocol = "HTTP"
   vpc_id   = var.vpc_id
   target_type = "ip"
+  load_balancing_algorithm_type = "weighted_random"
+  load_balancing_anomaly_mitigation = "on"
 
   # Health check configuration
   health_check {
@@ -89,11 +91,11 @@ resource "aws_lb_target_group" "product_service_tg" {
     matcher             = "200"
   }
 
-  # Stickiness configuration
+  # # Stickiness configuration
   stickiness {
     type            = "lb_cookie"
     cookie_duration = 86400
-    enabled         = true
+    enabled         = false
   }
 
   # Deregistration delay
@@ -126,11 +128,11 @@ resource "aws_lb_target_group" "shopping_cart_service_tg" {
     matcher             = "200"
   }
 
-  # Stickiness configuration
+  # # Stickiness configuration
   stickiness {
     type            = "lb_cookie"
     cookie_duration = 86400
-    enabled         = true
+    enabled         = false
   }
 
   # Deregistration delay
@@ -163,11 +165,11 @@ resource "aws_lb_target_group" "credit_card_service_tg" {
     matcher             = "200"
   }
 
-  # Stickiness configuration
+  # # Stickiness configuration
   stickiness {
     type            = "lb_cookie"
     cookie_duration = 86400
-    enabled         = true
+    enabled         = false
   }
 
   # Deregistration delay

@@ -55,3 +55,39 @@ override.tf
 override.tf.json
 *_override.tf
 *_override.tf.json
+
+# Test Results and Metrics (don't commit test outputs)
+results/
+*.csv
+test_*.csv
+test_*.txt
+final_*.csv
+final_*.txt
+FINAL_*.csv
+FINAL_*.txt
+aws_load_test_*
+
+# Build/deployment scripts (can commit, but mark as executable)
+# Uncomment if you don't want to commit scripts:
+# *.sh
+
+# Terraform generated files
+terraform/.terraform/
+terraform/.terraform.lock.hcl
+terraform/terraform.tfstate
+terraform/terraform.tfstate.backup
+terraform/*.tfstate*
+
+# IDE specific
+.idea/
+.vscode/
+*.iml
+.DS_Store
+
+# Maven
+**/target/
+**/dependency-reduced-pom.xml
+
+# Logs
+*.log
+
