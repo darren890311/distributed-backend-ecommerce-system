@@ -26,7 +26,20 @@ import java.util.stream.Collectors;
 
 /**
  * Business logic for Shopping Cart operations
- * Handles cart creation, adding items, and checkout with payment processing
+ *
+ * This service orchestrates the checkout process by:
+ * 1. Validating products exist (calls Product Service via private IP)
+ * 2. Authorizing payments (calls Credit Card Authorizer via private IP)
+ * 3. Publishing orders to RabbitMQ for warehouse fulfillment
+ *
+ * Inter-service Communication:
+ * - Uses direct container-to-container communication via private IPs
+ * - Configured through environment variables (SERVICES_PRODUCT_URL, SERVICES_CREDIT_CARD_AUTHORIZER_URL)
+ * - AWS Learner Lab limitation: Cannot use Service Discovery, so IPs must be manually configured
+ *
+ * RabbitMQ Integration:
+ * - Fire-and-forget pattern: publishes order message and returns immediately
+ * - Warehouse consumer processes orders asynchronously
  */
 @Service
 @Slf4j
@@ -87,9 +100,9 @@ public class ShoppingCartService {
 
     // Validate product exists by calling Product Service
     Integer productId = request.getProductId();
-    if (!validateProductExists(productId)) {
-      throw new ProductNotFoundException("Product not found: " + productId);
-    }
+     if (!validateProductExists(productId)) {
+       throw new ProductNotFoundException("Product not found: " + productId);
+     }
 
     // Check if product already in cart
     Optional<CartItemEntity> existingItem = cartItemRepository

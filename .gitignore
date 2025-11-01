@@ -1,10 +1,22 @@
+# Spring Boot / Maven
 HELP.md
 target/
 .mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/
 !**/src/test/**/target/
+**/dependency-reduced-pom.xml
 
-### STS ###
+### IDE ###
+# IntelliJ IDEA
+.idea/
+*.iws
+*.iml
+*.ipr
+
+# VS Code
+.vscode/
+
+# Eclipse/STS
 .apt_generated
 .classpath
 .factorypath
@@ -13,13 +25,7 @@ target/
 .springBeans
 .sts4-cache
 
-### IntelliJ IDEA ###
-.idea
-*.iws
-*.iml
-*.ipr
-
-### NetBeans ###
+# NetBeans
 /nbproject/private/
 /nbbuild/
 /dist/
@@ -29,43 +35,58 @@ build/
 !**/src/main/**/build/
 !**/src/test/**/build/
 
-### VS Code ###
-.vscode/
-
-# Load testing outputs
-load-testing-client/load_test_*.csv
-load-testing-client/load_test_*.txt
-load-testing-client/test-results/
-
-# OS
-.DS_Store
-.DS_Store?
-
 ### Terraform ###
 # Local .terraform directories
 **/.terraform/*
+.terraform/
+.terraform.lock.hcl
 
-# .tfstate files
+# State files
 *.tfstate
 *.tfstate.*
+*.tfstate.backup
+terraform.tfstate.d/
 
-# Crash log files
-crash.log
-crash.*.log
-
-# Exclude all .tfvars files, which are likely to contain sensitive data
+# Variable files (may contain sensitive data)
 *.tfvars
 *.tfvars.json
+!terraform.tfvars.example
 
-# Ignore override files as they are usually used to override resources locally
+# Override files
 override.tf
 override.tf.json
 *_override.tf
 *_override.tf.json
 
-# Ignore CLI configuration files
+# Crash log files
+crash.log
+crash.*.log
+
+# CLI configuration files
 .terraformrc
 terraform.rc
 
-# Ignore lock file (uncomment if you want to commit it)
-# .terraform.lock.hcl
+### Test Results and Metrics ###
+# Don't commit test outputs
+results/
+*.csv
+test_*.csv
+test_*.txt
+final_*.csv
+final_*.txt
+FINAL_*.csv
+FINAL_*.txt
+aws_load_test_*
+load-testing-client/load_test_*.csv
+load-testing-client/load_test_*.txt
+load-testing-client/test-results/
+
+### OS ###
+.DS_Store
+.DS_Store?
+*.swp
+*.swo
+*~
+
+### Logs ###
+*.log
