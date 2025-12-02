@@ -19,9 +19,10 @@ public class WarehouseConsumer {
   public WarehouseConsumer(WarehouseService warehouseService) {
     this.warehouseService = warehouseService;
   }
-
   @RabbitListener(queues = "checkoutQueue", ackMode = "MANUAL")
   public void receiveMessage(Message message, Channel channel) {
+    long deliveryTag = message.getMessageProperties().getDeliveryTag();
+
     try {
       String json = new String(message.getBody());
       JsonNode root = objectMapper.readTree(json);
@@ -31,12 +32,12 @@ public class WarehouseConsumer {
 
       warehouseService.recordOrder(orderId, products);
 
-      channel.basicAck(message.getMessageProperties().getDeliveryTag(), false);
+      channel.basicAck(deliveryTag, false);
 
     } catch (Exception e) {
-      System.err.println("Error processing message: " + e.getMessage());
+      System.err.println("Error processing message (Delivery Tag: " + deliveryTag + "): " + e.getMessage());
       try {
-        channel.basicNack(message.getMessageProperties().getDeliveryTag(), false, false);
+        channel.basicNack(deliveryTag, false, false);
       } catch (Exception ex) {
         ex.printStackTrace();
       }

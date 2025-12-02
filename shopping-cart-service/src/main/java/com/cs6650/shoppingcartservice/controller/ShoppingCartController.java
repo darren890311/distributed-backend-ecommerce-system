@@ -2,7 +2,7 @@ package com.cs6650.shoppingcartservice.controller;
 
 import com.cs6650.shoppingcart.api.ShoppingCartApi;
 import com.cs6650.shoppingcart.model.*;
-import com.cs6650.shoppingcartservice.entity.ShoppingCartEntity;
+import com.cs6650.shoppingcartservice.model.ShoppingCart;
 import com.cs6650.shoppingcartservice.service.ShoppingCartService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -11,10 +11,6 @@ import org.springframework.web.bind.annotation.*;
 
 import java.net.URI;
 
-/**
- * Shopping Cart Controller
- * Implements ShoppingCartApi interface generated from OpenAPI spec
- */
 @Slf4j
 @RestController
 @RequiredArgsConstructor
@@ -29,14 +25,19 @@ public class ShoppingCartController implements ShoppingCartApi {
 
     log.info("Creating shopping cart for customer: {}", request.getCustomerId());
 
-    ShoppingCartEntity cart = shoppingCartService.createCart(request.getCustomerId());
+    try {
+      ShoppingCart cart = shoppingCartService.createCart(request.getCustomerId());
 
-    CreateShoppingCart201Response response = new CreateShoppingCart201Response();
-    response.setShoppingCartId(cart.getShoppingCartId());
+      CreateShoppingCart201Response response = new CreateShoppingCart201Response();
+      response.setShoppingCartId(cart.getShoppingCartId());
 
-    return ResponseEntity
-        .created(URI.create("/shopping-carts/" + cart.getShoppingCartId()))
-        .body(response);
+      return ResponseEntity
+          .created(URI.create("/shopping-carts/" + cart.getShoppingCartId()))
+          .body(response);
+    } catch (Exception e) {
+      log.error("Error creating cart: {}", e.getMessage(), e);
+      return ResponseEntity.status(500).build();
+    }
   }
 
   @Override
@@ -61,20 +62,20 @@ public class ShoppingCartController implements ShoppingCartApi {
 
     log.info("Checking out cart {}", shoppingCartId);
 
-    Integer orderId = shoppingCartService.checkoutCart(
-        shoppingCartId,
-        request.getCreditCardNumber()
-    );
+    try {
+      Integer orderId = shoppingCartService.checkoutCart(
+          shoppingCartId,
+          request.getCreditCardNumber()
+      );
 
-    CheckoutCart200Response response = new CheckoutCart200Response();
-    response.setOrderId(orderId);
+      CheckoutCart200Response response = new CheckoutCart200Response();
+      response.setOrderId(orderId);
 
-    return ResponseEntity.ok(response);
+      return ResponseEntity.ok(response);
+    } catch (Exception e) {
+      throw new RuntimeException(e);
+    }
   }
-
-  /**
-   * Exception handlers - use fully qualified name for Error model
-   */
 
   @ExceptionHandler(ShoppingCartService.CartNotFoundException.class)
   public ResponseEntity<com.cs6650.shoppingcart.model.Error> handleCartNotFound(
@@ -101,6 +102,20 @@ public class ShoppingCartController implements ShoppingCartApi {
 
     return ResponseEntity.status(404).body(error);
   }
+
+  @ExceptionHandler(ShoppingCartService.InsufficientStockException.class)
+  public ResponseEntity<com.cs6650.shoppingcart.model.Error> handleInsufficientStock(
+      ShoppingCartService.InsufficientStockException ex) {
+
+    log.error("Insufficient stock: {}", ex.getMessage());
+
+    com.cs6650.shoppingcart.model.Error error = new com.cs6650.shoppingcart.model.Error();
+    error.setError("INSUFFICIENT_STOCK");
+    error.setMessage(ex.getMessage());
+
+    return ResponseEntity.status(404).body(error);
+  }
+
 
   @ExceptionHandler(ShoppingCartService.InvalidCartStateException.class)
   public ResponseEntity<com.cs6650.shoppingcart.model.Error> handleInvalidCartState(

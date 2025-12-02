@@ -1,6 +1,7 @@
-package com.cs6650.creditcardauthorizer.controller;
+package com.cs6650.creditcardauthorizer;
 
 import com.cs6650.cca.model.ProcessPaymentRequest;
+import com.cs6650.creditcardauthorizer.controller.CreditCardController;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.ResponseEntity;
 

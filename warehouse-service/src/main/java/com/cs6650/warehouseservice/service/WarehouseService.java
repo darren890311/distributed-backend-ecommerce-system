@@ -19,21 +19,17 @@ public class WarehouseService {
     totalOrders.incrementAndGet();
 
     for (JsonNode product : products) {
-      int productId = product.get("product_id").asInt();
-      int quantity = product.get("quantity").asInt();
-
-      productQuantities
-          .computeIfAbsent(productId, k -> new AtomicInteger(0))
-          .addAndGet(quantity);
+      if (product.has("product_id") && product.has("quantity")) {
+        int productId = product.get("product_id").asInt();
+        int quantity = product.get("quantity").asInt();
+        productQuantities
+            .computeIfAbsent(productId, k -> new AtomicInteger(0))
+            .addAndGet(quantity);
+      }
     }
-
     System.out.println("Processed order " + orderId +
         " | Total Orders: " + totalOrders.get());
-    System.out.println("Current Product Totals:");
-    productQuantities.forEach((id, totalQty) ->
-        System.out.println(" - Product " + id + ": " + totalQty.get()));
   }
-
   @PreDestroy
   public void onShutdown() {
     System.out.println("=== Warehouse shutting down ===");

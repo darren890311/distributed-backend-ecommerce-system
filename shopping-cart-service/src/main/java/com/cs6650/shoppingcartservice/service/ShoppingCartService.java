@@ -1,53 +1,37 @@
 package com.cs6650.shoppingcartservice.service;
 
-import com.cs6650.shoppingcartservice.entity.CartItemEntity;
-import com.cs6650.shoppingcartservice.entity.ShoppingCartEntity;
+import com.cs6650.shoppingcartservice.kvclient.KvStoreClient;
+import com.cs6650.shoppingcartservice.client.WarehouseServiceClient;
+import com.cs6650.shoppingcartservice.model.ShoppingCart;
+import com.cs6650.shoppingcartservice.model.ShoppingCart.CartItem;
 import com.cs6650.shoppingcart.model.AddItemsToCartRequest;
 import com.cs6650.shoppingcart.model.ProcessPaymentRequest;
 import com.cs6650.shoppingcart.model.Product;
-import com.cs6650.shoppingcartservice.repository.CartItemRepository;
-import com.cs6650.shoppingcartservice.repository.ShoppingCartRepository;
+import com.cs6650.shoppingcartservice.dto.OrderMessage;
+import com.cs6650.shoppingcartservice.config.RabbitMQConfig;
+
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.ResponseEntity;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.client.HttpClientErrorException;
-import org.springframework.web.client.RestTemplate;
-
-import com.cs6650.shoppingcartservice.config.RabbitMQConfig;
-import com.cs6650.shoppingcartservice.dto.OrderMessage;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestTemplate;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.http.ResponseEntity;
 
+import java.util.ArrayList;
 import java.util.Optional;
+import java.util.Random;
 import java.util.List;
 import java.util.stream.Collectors;
 
-/**
- * Business logic for Shopping Cart operations
- *
- * This service orchestrates the checkout process by:
- * 1. Validating products exist (calls Product Service via private IP)
- * 2. Authorizing payments (calls Credit Card Authorizer via private IP)
- * 3. Publishing orders to RabbitMQ for warehouse fulfillment
- *
- * Inter-service Communication:
- * - Uses direct container-to-container communication via private IPs
- * - Configured through environment variables (SERVICES_PRODUCT_URL, SERVICES_CREDIT_CARD_AUTHORIZER_URL)
- * - AWS Learner Lab limitation: Cannot use Service Discovery, so IPs must be manually configured
- *
- * RabbitMQ Integration:
- * - Fire-and-forget pattern: publishes order message and returns immediately
- * - Warehouse consumer processes orders asynchronously
- */
 @Service
 @Slf4j
 @RequiredArgsConstructor
 public class ShoppingCartService {
 
-  private final ShoppingCartRepository cartRepository;
-  private final CartItemRepository cartItemRepository;
+  private final KvStoreClient kvStoreClient;
+  private final WarehouseServiceClient warehouseClient;
   private final RestTemplate restTemplate;
   private final RabbitTemplate rabbitTemplate;
 
@@ -57,152 +41,135 @@ public class ShoppingCartService {
   @Value("${services.credit-card-authorizer.url}")
   private String ccaServiceUrl;
 
-  /**
-   * Create a new shopping cart
-   */
-  @Transactional
-  public ShoppingCartEntity createCart(Integer customerId) {
+  private final Random random = new Random();
+
+  public ShoppingCart createCart(Integer customerId) throws Exception {
     log.info("Creating cart for customer: {}", customerId);
 
-    ShoppingCartEntity cart = new ShoppingCartEntity();
-    cart.setCustomerId(customerId);
-    cart.setStatus(ShoppingCartEntity.CartStatus.ACTIVE);
+    Integer cartId = random.nextInt(Integer.MAX_VALUE) + 1;
 
-    ShoppingCartEntity saved = cartRepository.save(cart);
-    log.info("Cart created with ID: {}", saved.getShoppingCartId());
+    ShoppingCart newCart = new ShoppingCart();
+    newCart.setShoppingCartId(cartId);
+    newCart.setCustomerId(customerId);
+    newCart.setStatus("ACTIVE");
+    newCart.setItems(new ArrayList<>());
 
-    return saved;
+    kvStoreClient.setShoppingCart(cartId, newCart);
+    log.info("Cart created with ID: {}", cartId);
+
+    return newCart;
   }
-
-  /**
-   * Get cart by ID
-   */
-  public Optional<ShoppingCartEntity> getCart(Integer cartId) {
-    return cartRepository.findById(cartId);
-  }
-
-  /**
-   * Add items to cart
-   * Validates products exist by calling Product Service
-   */
-  @Transactional
   public void addItemsToCart(Integer cartId, AddItemsToCartRequest request) {
-    log.info("Adding items to cart: {}", cartId);
+    ShoppingCart cart;
+    try {
+      cart = kvStoreClient.getShoppingCart(cartId)
+          .orElseThrow(() -> new CartNotFoundException("Cart not found: " + cartId));
+    } catch (Exception e) {
+      throw new ServiceCommunicationException("Failed to retrieve cart from DB", e);
+    }
 
-    // Get cart
-    ShoppingCartEntity cart = cartRepository.findById(cartId)
-        .orElseThrow(() -> new CartNotFoundException("Cart not found: " + cartId));
-
-    // Validate cart is active
-    if (cart.getStatus() != ShoppingCartEntity.CartStatus.ACTIVE) {
+    if (!"ACTIVE".equals(cart.getStatus())) {
       throw new InvalidCartStateException("Cart is not active: " + cart.getStatus());
     }
 
-    // Validate product exists by calling Product Service
-    Integer productId = request.getProductId();
-     if (!validateProductExists(productId)) {
-       throw new ProductNotFoundException("Product not found: " + productId);
-     }
+    try {
+      kvStoreClient.beginTransaction(cartId);
 
-    // Check if product already in cart
-    Optional<CartItemEntity> existingItem = cartItemRepository
-        .findByShoppingCart_ShoppingCartIdAndProductId(cartId, productId);
+      Integer productId = request.getProductId();
+      Integer quantity = request.getQuantity();
+      if (!validateProductExists(productId)) {
+        kvStoreClient.abortTransaction(cartId);
+        throw new ProductNotFoundException("Product not found: " + productId);
+      }
+      warehouseClient.checkInventoryAndReserve(productId, quantity);
 
-    if (existingItem.isPresent()) {
-      // Update quantity
-      CartItemEntity item = existingItem.get();
-      item.setQuantity(item.getQuantity() + request.getQuantity());
-      cartItemRepository.save(item);
-      log.info("Updated quantity for product {} in cart {}", productId, cartId);
-    } else {
-      // Add new item
-      CartItemEntity newItem = new CartItemEntity(cart, productId, request.getQuantity());
-      cartItemRepository.save(newItem);
-      log.info("Added product {} to cart {}", productId, cartId);
+      Optional<CartItem> existingItem = cart.getItems().stream()
+          .filter(item -> item.getProductId().equals(productId))
+          .findFirst();
+
+      if (existingItem.isPresent()) {
+        CartItem item = existingItem.get();
+        item.setQuantity(item.getQuantity() + quantity);
+      } else {
+        cart.getItems().add(new CartItem(productId, quantity));
+      }
+      kvStoreClient.setShoppingCart(cartId, cart);
+
+      kvStoreClient.endTransaction(cartId);
+
+    } catch (InsufficientStockException | ProductNotFoundException e) {
+      throw e;
+    } catch (Exception e) {
+      log.error("Unexpected error during addItemsToCart for Cart {}: {}", cartId, e.getMessage());
+      try {
+        kvStoreClient.abortTransaction(cartId);
+      } catch (Exception abortEx) {
+        log.error("Failed to call abort during recovery.", abortEx);
+      }
+      throw new ServiceCommunicationException("Add item failed due to error: " + e.getMessage(), e);
     }
   }
-
-  /**
-   * Checkout cart
-   * - Validates cart exists and is active
-   * - Calls Credit Card Authorizer to process payment
-   * - Publishes order to RabbitMQ for warehouse
-   * - Marks cart as checked out
-   * - Returns order ID
-   */
-  @Transactional
-  public Integer checkoutCart(Integer cartId, String creditCardNumber) {
+  public Integer checkoutCart(Integer cartId, String creditCardNumber) throws Exception {
     log.info("Checking out cart: {}", cartId);
 
-    // Get cart
-    ShoppingCartEntity cart = cartRepository.findById(cartId)
-        .orElseThrow(() -> new CartNotFoundException("Cart not found: " + cartId));
-
-    // Validate cart is active
-    if (cart.getStatus() != ShoppingCartEntity.CartStatus.ACTIVE) {
-      throw new InvalidCartStateException("Cart is not active: " + cart.getStatus());
+    ShoppingCart cart;
+    try {
+      cart = kvStoreClient.getShoppingCart(cartId)
+          .orElseThrow(() -> new CartNotFoundException("Cart not found: " + cartId));
+    } catch (Exception e) {
+      throw new ServiceCommunicationException("Failed to retrieve cart from DB", e);
     }
 
-    // Validate cart has items
+    if (cart.getStatus().equals("CHECKED_OUT")) {
+      throw new InvalidCartStateException("Cart is already checked out.");
+    }
     if (cart.getItems().isEmpty()) {
       throw new InvalidCartStateException("Cart is empty");
     }
 
-    // Process payment via Credit Card Authorizer
-    boolean paymentAuthorized = authorizePayment(creditCardNumber);
-
-    if (!paymentAuthorized) {
-      log.warn("Payment declined for cart: {}", cartId);
-      throw new PaymentDeclinedException("Payment was declined");
-    }
-
-    // Publish to RabbitMQ
     try {
+      kvStoreClient.beginTransaction(cartId);
+      boolean paymentAuthorized = authorizePayment(creditCardNumber);
+
+      if (!paymentAuthorized) {
+        kvStoreClient.abortTransaction(cartId);
+        throw new PaymentDeclinedException("Payment was declined");
+      }
       publishOrderToWarehouse(cart);
       log.info("Order published to warehouse queue for cart: {}", cartId);
+
+      cart.setStatus("CHECKED_OUT");
+      cart.setItems(new ArrayList<>());
+      kvStoreClient.setShoppingCart(cartId, cart);
+
+      kvStoreClient.endTransaction(cartId);
+
+      return cartId;
+
+    } catch (PaymentDeclinedException e) {
+      throw e;
     } catch (Exception e) {
-      log.error("Failed to publish order to warehouse: {}", e.getMessage());
-      // You could decide whether to fail the checkout or just log the error
-      // For now, we'll continue and mark cart as checked out
+      log.error("Unexpected error during checkout for Cart {}: {}", cartId, e.getMessage());
+      try {
+        kvStoreClient.abortTransaction(cartId);
+      } catch (Exception abortEx) {
+        log.error("Failed to call abort during recovery.", abortEx);
+      }
+      throw new ServiceCommunicationException("Checkout failed due to error: " + e.getMessage(), e);
     }
-
-    // Mark cart as checked out
-    cart.setStatus(ShoppingCartEntity.CartStatus.CHECKED_OUT);
-    cartRepository.save(cart);
-
-    log.info("Cart {} checked out successfully", cartId);
-
-    // Return cart ID as order ID
-    return cartId;
   }
 
-  /**
-   * Publish order to RabbitMQ for warehouse processing
-   */
-  private void publishOrderToWarehouse(ShoppingCartEntity cart) {
-    // Convert cart items to order message format
+  private void publishOrderToWarehouse(ShoppingCart cart) {
     List<OrderMessage.ProductItem> products = cart.getItems().stream()
-        .map(item -> new OrderMessage.ProductItem(
-            item.getProductId(),
-            item.getQuantity()
-        ))
+        .map(item -> new OrderMessage.ProductItem(item.getProductId(), item.getQuantity()))
         .collect(Collectors.toList());
 
-    OrderMessage orderMessage = new OrderMessage(
-        cart.getShoppingCartId(),
-        products
-    );
-
-    // Publish to RabbitMQ
+    OrderMessage orderMessage = new OrderMessage(cart.getShoppingCartId(), products);
     rabbitTemplate.convertAndSend(RabbitMQConfig.CHECKOUT_QUEUE, orderMessage);
 
-    log.info("Published order {} to queue with {} products",
-        cart.getShoppingCartId(), products.size());
+    log.info("Published order {} to queue with {} products", cart.getShoppingCartId(), products.size());
   }
 
-  /**
-   * Validate product exists by calling Product Service
-   */
   private boolean validateProductExists(Integer productId) {
     try {
       String url = productServiceUrl + "/products/" + productId;
@@ -210,10 +177,7 @@ public class ShoppingCartService {
 
       ResponseEntity<Product> response = restTemplate.getForEntity(url, Product.class);
 
-      boolean exists = response.getStatusCode().is2xxSuccessful();
-      log.info("Product {} exists: {}", productId, exists);
-
-      return exists;
+      return response.getStatusCode().is2xxSuccessful();
 
     } catch (HttpClientErrorException.NotFound e) {
       log.warn("Product not found: {}", productId);
@@ -224,9 +188,6 @@ public class ShoppingCartService {
     }
   }
 
-  /**
-   * Authorize payment by calling Credit Card Authorizer
-   */
   private boolean authorizePayment(String creditCardNumber) {
     try {
       String url = ccaServiceUrl + "/credit-card-authorizer/authorize";
@@ -237,11 +198,7 @@ public class ShoppingCartService {
 
       ResponseEntity<Void> response = restTemplate.postForEntity(url, request, Void.class);
 
-      // 200 = Authorized, 402 = Declined
-      boolean authorized = response.getStatusCode().is2xxSuccessful();
-      log.info("Payment authorized: {}", authorized);
-
-      return authorized;
+      return response.getStatusCode().is2xxSuccessful();
 
     } catch (HttpClientErrorException e) {
       if (e.getStatusCode().value() == 402) {
@@ -256,36 +213,20 @@ public class ShoppingCartService {
     }
   }
 
-  /**
-   * Custom exceptions
-   */
-  public static class CartNotFoundException extends RuntimeException {
-    public CartNotFoundException(String message) {
-      super(message);
-    }
-  }
-
-  public static class InvalidCartStateException extends RuntimeException {
-    public InvalidCartStateException(String message) {
-      super(message);
-    }
-  }
+  public static class CartNotFoundException extends RuntimeException { public CartNotFoundException(String message) { super(message); } }
+  public static class InvalidCartStateException extends RuntimeException { public InvalidCartStateException(String message) { super(message); } }
 
   public static class ProductNotFoundException extends RuntimeException {
-    public ProductNotFoundException(String message) {
-      super(message);
-    }
+    public ProductNotFoundException(String message) { super(message); }
   }
 
-  public static class PaymentDeclinedException extends RuntimeException {
-    public PaymentDeclinedException(String message) {
-      super(message);
-    }
-  }
+  public static class PaymentDeclinedException extends RuntimeException { public PaymentDeclinedException(String message) { super(message); } }
 
   public static class ServiceCommunicationException extends RuntimeException {
-    public ServiceCommunicationException(String message, Throwable cause) {
-      super(message, cause);
-    }
+    public ServiceCommunicationException(String message, Throwable cause) { super(message, cause); }
+  }
+
+  public static class InsufficientStockException extends RuntimeException {
+    public InsufficientStockException(String message) { super(message); }
   }
 }
