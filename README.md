@@ -1,211 +1,180 @@
-# CS6650 Assignment 3 - E-Commerce Microservices with RabbitMQ
+# CS6650 Assignment 5 - E-Commerce System: KV DB Integration & Auto-Scaling
 
 ## Project Overview
-Distributed e-commerce system with microservices architecture, demonstrating:
-- Scalable message queue processing with RabbitMQ
-- AWS deployment with Application Load Balancer
-- High-throughput load testing and optimization
-- Container orchestration with ECS Fargate
+This assignment integrates all distributed components built throughout the course. The primary goal is to simulate a production-ready e-commerce environment by implementing all core business logic, replacing JPA with a Distributed Key-Value Database (KV DB), and introducing deliberate processing delays to stimulate horizontal auto-scaling in AWS.
+The system now features a complete transactional flow from adding an item to finalizing the checkout process, coordinated by the Shopping Cart Service (SCS).
 
-## Architecture
-```
-Client (Load Tester)
-    ↓ HTTP
-Application Load Balancer
-    ↓
-┌─────────────────┬──────────────────┬───────────────────┐
-│ Product Service │ Shopping Cart    │ Credit Card       │
-│ (Port 8082)     │ Service          │ Authorizer        │
-│                 │ (Port 8084)      │ (Port 8080)       │
-└─────────────────┴──────────────────┴───────────────────┘
-         ↑                 ↓                    ↑
-         │        RabbitMQ Queue                │
-         │         (Port 5672)                  │
-         │                 ↓                    │
-         │        Warehouse Consumer            │
-         │        (8-16 threads)                │
-         └─────────────────────────────────────┘
-           (Private IP Communication)
-```
 
 ## Key Features
 
 ### Microservices
-1. **Product Service**: CRUD operations for products
-2. **Shopping Cart Service**: Cart management and checkout orchestration
-3. **Credit Card Authorizer**: Payment validation (90% approval rate)
-4. **Warehouse Consumer**: Asynchronous order processing via RabbitMQ
+1. **Product Service**: Migrated to Distributed KV DB storage. Includes server-side ID generation and delays.
+2. **Shopping Cart Service**: Full checkout orchestration with simulated ACID transactions (BEGIN/END/ABORT). Fully migrated from JPA to KV DB.
+3. **Credit Card Authorizer**: Payment validation (90% approval rate). Implements explicit card syntax check and delays.
+4. **Warehouse Consumer**: reserve (90% stock check) and ship endpoints. Functions as the RabbitMQ Consumer for asynchronous order fulfillment.
 
-### Infrastructure
-- **AWS ECS Fargate**: Serverless container orchestration
-- **Application Load Balancer**: Traffic distribution with health-based routing
-- **RabbitMQ**: Message queue for asynchronous communication
-- **Terraform**: Infrastructure as Code for repeatable deployments
 
-### Performance Optimization
-- **Thread Configuration**: 128 client threads, 8-16 warehouse consumer threads
-- **Connection Pooling**: HTTP client reuse for efficiency
-- **Optimized Load Testing**: 1 item per cart for maximum throughput
-- **Achieved Throughput**: ~115 requests/second with 96.7% success rate
+## Local Code Review & Quick Start Guide
+Local Development & Integration Test Guide
 
-## Quick Start
+This guide details the precise steps and commands required to launch the integrated microservice ecosystem locally for code review and functional testing.
 
-### Prerequisites
-- AWS Learner Lab access
-- Docker Desktop
-- Java 17+
-- Maven 3.8+
-- Terraform 1.0+
+---
 
-### Local Development (Docker Compose)
+## 1. Start Infrastructure (KV DB Leader & RabbitMQ)
+
+### KV DB Leader (Assignment 4)
+
+**Terminal Location:**
+```
+cs6650-assignment4/leader-follower-kv
+```
+
+**Run Command:**
 ```bash
-# Start all services locally
-docker-compose up --build
-
-# Access RabbitMQ Management: http://localhost:15672 (guest/guest)
+mvn spring-boot:run -Dspring-boot.run.profiles=leader
 ```
 
-### AWS Deployment
+**Notes:**
+- Leader runs on **port 8080**.
 
-#### 1. Configure AWS Credentials
+---
+
+### RabbitMQ Broker (Docker)
+
+**Terminal Location:** Any directory
+
+**Run Command:**
 ```bash
-# Update credentials from AWS Learner Lab
-nano ~/.aws/credentials
-# Test: aws sts get-caller-identity
+docker run -d --hostname rabbit-server --name rabbitmq \
+  -p 5672:5672 -p 15672:15672 rabbitmq:3-management
 ```
 
-#### 2. Deploy Infrastructure
-```bash
-cd terraform
-terraform init
-terraform apply  # Takes ~10 minutes
+**Notes:**
+- Management UI: http://localhost:15672  
+- Username/password: `guest / guest`
+
+---
+
+## 2. Start Microservices (Assignment 5)
+
+Start each service in a **separate terminal**.
+
+| Service | Directory | Command | Port |
+|--------|-----------|---------|------|
+| **Product Service (PS)** | `product-service` | `mvn spring-boot:run` | 8082 |
+| **Warehouse Service (WS)** | `warehouse-service` | `mvn spring-boot:run` | 9083 |
+| **Credit Card Auth (CCA)** | `credit-card-authorizer` | `mvn spring-boot:run` | 8085 |
+| **Shopping Cart Service (SCS)** | `shopping-cart-service` | `mvn spring-boot:run` | 8084 |
+
+---
+
+## 3. Integration Test Sequence (Postman)
+
+Once all services are running, test the end-to-end flow through **Shopping Cart Service (SCS)**.
+
+---
+
+### 3.1 Product Pre-Check
+
+**Endpoint:**
+```
+POST http://localhost:8082/products
 ```
 
-#### 3. Get Service Private IPs
-```bash
-# Wait 3 minutes for services to start
-./get-service-ips.sh
-
-# Update ecs_task_definitions.tf with displayed IPs
-# Then: terraform apply
+**Example Body:**
+```json
+{
+    "product_id": 1,
+    "sku": "ABC123XYZ9",
+    "manufacturer": "Global Manufacturing Co",
+    "category_id": 1001,
+    "weight": 500,
+    "some_other_id": 1
+}
 ```
 
-#### 4. Build and Push Docker Images
-```bash
-cd ..
-aws ecr get-login-password --region us-west-2 | \
-  docker login --username AWS --password-stdin 590183802817.dkr.ecr.us-west-2.amazonaws.com
+**Purpose:**
+- Verify KV DB write  
+- Save generated `product_id`
 
-./build-and-push-all.sh  # Takes ~15 minutes
+---
+
+### 3.2 Create Cart
+
+**Endpoint:**
+```
+POST http://localhost:8084/shopping-cart
 ```
 
-#### 5. Force Services to Pull New Images
-```bash
-for service in product-service shopping-cart-service credit-card-authorizer warehouse-service; do
-  aws ecs update-service --cluster ecommerce-cluster --service $service --force-new-deployment --no-cli-pager
-done
-
-# Wait 3 minutes for services to restart
-sleep 180
+**Body:**
+```json
+{
+  "customer_id": 100
+}
 ```
 
-### Run Load Test
-```bash
-cd load-testing-client
+**Purpose:**
+- Create a new shopping cart  
+- Save returned `shoppingCartId`
 
-# Update config with new ALB DNS
-nano src/main/resources/config-aws.properties
+---
 
-# Compile and run
-mvn clean compile
-mvn exec:java -Dexec.mainClass="com.cs6650.loadtest.LoadTestingClient" -Dexec.args="aws"
+### 3.3 Add Item (Use Case 1)
+
+**Endpoint:**
+```
+POST http://localhost:8084/shopping-carts/{cartId}/addItem
 ```
 
-Monitor RabbitMQ: Check terraform output for `rabbitmq_management_url`
-
-## Configuration
-
-### Key Configuration Files
-
-#### Load Testing (`load-testing-client/src/main/resources/config-aws.properties`)
-```properties
-total.checkouts=200000    # Number of checkout operations
-items.per.cart=1          # Items per cart (optimized for throughput)
-thread.count=128          # Client threads for maximum throughput
+**Body:**
+```json
+{
+  "product_id": "<SAVED_PRODUCT_ID>",
+  "quantity": 1
+}
 ```
 
-#### Warehouse Consumer (`terraform/ecs_task_definitions.tf`)
-```hcl
-SPRING_RABBITMQ_LISTENER_SIMPLE_CONCURRENCY=8      # Initial consumer threads
-SPRING_RABBITMQ_LISTENER_SIMPLE_MAX_CONCURRENCY=16 # Max consumer threads
-SPRING_RABBITMQ_LISTENER_SIMPLE_PREFETCH=250       # Messages per consumer
+**Verify in Logs:**
+- `BEGIN TRANSACTION` / `END TRANSACTION`  
+- Product existence check (PS)  
+- Stock check (WS)
+
+---
+
+### 3.4 Checkout (Use Case 2)
+
+**Endpoint:**
+```
+POST http://localhost:8084/shopping-carts/{cartId}/checkout
 ```
 
-### Inter-Service Communication
-
-**AWS Learner Lab Limitation:** Service Discovery (AWS Cloud Map) not available
-
-**Solution:** Direct container-to-container communication using private IPs
-- Shopping Cart → Product Service: `http://[PRODUCT_IP]:8082`
-- Shopping Cart → Credit Card Authorizer: `http://[CCA_IP]:8080`
-- Services → RabbitMQ: `[RABBITMQ_PRIVATE_IP]:5672`
-
-**Note:** Private IPs change with each lab session and must be updated in `terraform/ecs_task_definitions.tf`
-
-
-## Repository Structure
-```
-├── product-service/              # Product CRUD microservice
-│   ├── src/
-│   ├── Dockerfile
-│   └── pom.xml
-├── shopping-cart-service/        # Cart & checkout orchestrator
-│   ├── src/
-│   ├── Dockerfile
-│   └── pom.xml
-├── credit-card-authorizer/       # Payment validation service
-│   ├── src/
-│   ├── Dockerfile
-│   └── pom.xml
-├── warehouse-service/            # RabbitMQ consumer
-│   ├── src/
-│   ├── Dockerfile
-│   └── pom.xml
-├── load-testing-client/          # Performance testing client
-│   ├── src/
-│   └── pom.xml
-├── terraform/                    # Infrastructure as Code
-│   ├── *.tf files
-│   ├── get-service-ips.sh       # Helper for IP discovery
-│   └── RESTART_GUIDE.md
-├── docker-compose.yml            # Local development
-├── build-and-push-all.sh         # Build automation
-└── README.md
+**Body:**
+```json
+{
+  "credit_card_number": "1234-5678-9012-3456"
+}
 ```
 
+**Expected Behavior:**
+- Randomized payment simulation:
+  - `402 Payment Required` → failure  
+  - `200 OK` → success
+- On success:
+  - RabbitMQ publish event  
+  - Final `END TRANSACTION` persisted
 
-## Troubleshooting
+---
 
-### Common Issues
+## Summary
 
-**Service IPs need updating:**
-```bash
-cd terraform
-./get-service-ips.sh
-# Update ecs_task_definitions.tf with displayed IPs
-terraform apply
-aws ecs update-service --cluster ecommerce-cluster --service shopping-cart-service --force-new-deployment
-```
+This setup launches the full microservice ecosystem:
 
-**RabbitMQ not accessible:**
-```bash
-# Check if RabbitMQ is running
-aws ec2 describe-instances --instance-ids $(terraform output -raw rabbitmq_instance_id) --query 'Reservations[0].Instances[0].State.Name'
-# If stopped: aws ec2 start-instances --instance-ids $(terraform output -raw rabbitmq_instance_id)
-```
+- KV DB Leader  
+- RabbitMQ  
+- Product Service  
+- Warehouse Service  
+- Credit Card Auth  
+- Shopping Cart Service  
 
-**Services failing health checks:**
-```bash
-# Check logs
-aws logs tail /ecs/ecommerce --since 10m --follow
-```
+This environment supports complete end-to-end integration testing.
