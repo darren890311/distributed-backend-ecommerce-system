@@ -23,7 +23,7 @@ This guide details the precise steps and commands required to launch the integra
 
 ## 1. Start Infrastructure (KV DB Leader & RabbitMQ)
 
-### 🗄️ KV DB Leader (Assignment 4)
+### KV DB Leader (Assignment 4)
 
 **Terminal Location:**
 ```
@@ -40,7 +40,7 @@ mvn spring-boot:run -Dspring-boot.run.profiles=leader
 
 ---
 
-### 🐰 RabbitMQ Broker (Docker)
+### RabbitMQ Broker (Docker)
 
 **Terminal Location:** Any directory
 
@@ -63,7 +63,7 @@ Start each service in a **separate terminal**.
 | Service | Directory | Command | Port |
 |--------|-----------|---------|------|
 | **Product Service (PS)** | `product-service` | `mvn spring-boot:run` | 8082 |
-| **Warehouse Service (WS)** | `warehouse-service` | `mvn spring-boot:run` | 8083 |
+| **Warehouse Service (WS)** | `warehouse-service` | `mvn spring-boot:run` | 9083 |
 | **Credit Card Auth (CCA)** | `credit-card-authorizer` | `mvn spring-boot:run` | 8085 |
 | **Shopping Cart Service (SCS)** | `shopping-cart-service` | `mvn spring-boot:run` | 8084 |
 
@@ -75,7 +75,7 @@ Once all services are running, test the end-to-end flow through **Shopping Cart 
 
 ---
 
-### 3.1 ✅ Product Pre-Check
+### 3.1 Product Pre-Check
 
 **Endpoint:**
 ```
@@ -96,7 +96,7 @@ POST http://localhost:8082/products
 
 ---
 
-### 3.2 🛒 Create Cart
+### 3.2 Create Cart
 
 **Endpoint:**
 ```
@@ -116,7 +116,7 @@ POST http://localhost:8084/shopping-cart
 
 ---
 
-### 3.3 ➕ Add Item (Use Case 1)
+### 3.3 Add Item (Use Case 1)
 
 **Endpoint:**
 ```
@@ -138,7 +138,7 @@ POST http://localhost:8084/shopping-carts/{cartId}/addItem
 
 ---
 
-### 3.4 💳 Checkout (Use Case 2)
+### 3.4 Checkout (Use Case 2)
 
 **Endpoint:**
 ```
@@ -162,7 +162,7 @@ POST http://localhost:8084/shopping-carts/{cartId}/checkout
 
 ---
 
-## 🎯 Summary
+## Summary
 
 This setup launches the full microservice ecosystem:
 
