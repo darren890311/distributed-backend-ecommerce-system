@@ -27,7 +27,7 @@ This guide details the precise steps and commands required to launch the integra
 
 **Terminal Location:**
 ```
-cs6650-assignment4/leader-follower-kv
+cs6650-assignment5/kv-tx-stubs
 ```
 
 **Run Command:**
