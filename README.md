@@ -31,9 +31,9 @@ cs6650-assignment4/leader-follower-kv
 ```
 
 **Run Command:**
-\`\`\`bash
+```bash
 mvn spring-boot:run -Dspring-boot.run.profiles=leader
-\`\`\`
+```
 
 **Notes:**
 - Leader runs on **port 8080**.
@@ -45,10 +45,10 @@ mvn spring-boot:run -Dspring-boot.run.profiles=leader
 **Terminal Location:** Any directory
 
 **Run Command:**
-\`\`\`bash
+```bash
 docker run -d --hostname rabbit-server --name rabbitmq \
   -p 5672:5672 -p 15672:15672 rabbitmq:3-management
-\`\`\`
+```
 
 **Notes:**
 - Management UI: http://localhost:15672  
@@ -78,17 +78,17 @@ Once all services are running, test the end-to-end flow through **Shopping Cart 
 ### 3.1 ✅ Product Pre-Check
 
 **Endpoint:**
-\`\`\`
+```
 POST http://localhost:8082/products
-\`\`\`
+```
 
 **Example Body:**
-\`\`\`json
+```json
 {
   "name": "Test Product",
   "price": 10
 }
-\`\`\`
+```
 
 **Purpose:**
 - Verify KV DB write  
@@ -99,16 +99,16 @@ POST http://localhost:8082/products
 ### 3.2 🛒 Create Cart
 
 **Endpoint:**
-\`\`\`
+```
 POST http://localhost:8084/shopping-cart
-\`\`\`
+```
 
 **Body:**
-\`\`\`json
+```json
 {
   "customer_id": 100
 }
-\`\`\`
+```
 
 **Purpose:**
 - Create a new shopping cart  
@@ -119,17 +119,17 @@ POST http://localhost:8084/shopping-cart
 ### 3.3 ➕ Add Item (Use Case 1)
 
 **Endpoint:**
-\`\`\`
+```
 POST http://localhost:8084/shopping-carts/{cartId}/addItem
-\`\`\`
+```
 
 **Body:**
-\`\`\`json
+```json
 {
   "product_id": "<SAVED_PRODUCT_ID>",
   "quantity": 1
 }
-\`\`\`
+```
 
 **Verify in Logs:**
 - `BEGIN TRANSACTION` / `END TRANSACTION`  
@@ -141,16 +141,16 @@ POST http://localhost:8084/shopping-carts/{cartId}/addItem
 ### 3.4 💳 Checkout (Use Case 2)
 
 **Endpoint:**
-\`\`\`
+```
 POST http://localhost:8084/shopping-carts/{cartId}/checkout
-\`\`\`
+```
 
 **Body:**
-\`\`\`json
+```json
 {
   "credit_card_number": "1234-5678-9012-3456"
 }
-\`\`\`
+```
 
 **Expected Behavior:**
 - Randomized payment simulation:
