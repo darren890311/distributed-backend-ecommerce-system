@@ -85,8 +85,12 @@ POST http://localhost:8082/products
 **Example Body:**
 ```json
 {
-  "name": "Test Product",
-  "price": 10
+    "product_id": 1,
+    "sku": "ABC123XYZ9",
+    "manufacturer": "Global Manufacturing Co",
+    "category_id": 1001,
+    "weight": 500,
+    "some_other_id": 1
 }
 ```
 
