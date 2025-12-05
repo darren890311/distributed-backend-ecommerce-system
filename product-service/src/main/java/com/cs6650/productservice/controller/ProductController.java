@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.net.URI;
 import java.util.Optional;
+import java.util.concurrent.ThreadLocalRandom;
 
 @Slf4j
 @RestController
@@ -20,9 +21,23 @@ public class ProductController implements ProductApi {
 
   private final ProductService productService;
 
+  /**
+   * Simulates business logic processing delay (100-1000ms)
+   * Required for Assignment 5 to stimulate auto-scaling
+   */
+  private void addBusinessLogicDelay() {
+    try {
+      long delay = 100 + ThreadLocalRandom.current().nextInt(900);
+      Thread.sleep(delay);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+    }
+  }
+
   @Override
   @PostMapping("/products")
   public ResponseEntity<CreateProduct201Response> createProduct(@RequestBody Product product) {
+    addBusinessLogicDelay();
     try {
       log.info("Creating product: {}", product.getSku());
 
@@ -47,6 +62,7 @@ public class ProductController implements ProductApi {
   @Override
   @GetMapping("/products/{productId}")
   public ResponseEntity<Product> getProduct(@PathVariable("productId") Integer productId) {
+    addBusinessLogicDelay();
     try {
       log.info("Fetching product: {}", productId);
 

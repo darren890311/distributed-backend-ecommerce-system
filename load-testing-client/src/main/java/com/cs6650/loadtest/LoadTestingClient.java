@@ -25,10 +25,10 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public class LoadTestingClient {
 
-  // Configuration: Reduced to 1 product for RabbitMQ performance testing
-  // The assignment focuses on queue management, not product variety
-  // Using a single product minimizes setup time while fully testing RabbitMQ throughput
-  private static final int PRODUCT_POOL_SIZE = 1;
+  // Configuration: Pre-load 1,000 products as required by Assignment 5
+  // Products are created in Phase 1 before load testing begins
+  // All products stored in distributed KV database
+  private static final int PRODUCT_POOL_SIZE = 1000;
 
   public static void main(String[] args) {
     System.out.println("=== CS6650 Assignment 3 - Load Testing Client ===\n");
@@ -95,16 +95,28 @@ public class LoadTestingClient {
       HttpClientService httpClient) throws IOException {
 
     BlockingQueue<Integer> productQueue = new LinkedBlockingQueue<>();
+    List<Integer> productIds = new ArrayList<>();
 
     for (int i = 0; i < PRODUCT_POOL_SIZE; i++) {
       Product product = ProductGenerator.generateRandomProduct();
       Integer productId = httpClient.createProduct(product);
       productQueue.add(productId);
+      productIds.add(productId);
 
       // Progress indicator every 100 products
       if ((i + 1) % 100 == 0) {
         System.out.printf("Created %d/%d products\n", i + 1, PRODUCT_POOL_SIZE);
       }
+    }
+
+    // Export product IDs to file for Locust load testing
+    try (java.io.PrintWriter writer = new java.io.PrintWriter("/tmp/product_ids.txt")) {
+      for (Integer id : productIds) {
+        writer.println(id);
+      }
+      System.out.println("Product IDs exported to /tmp/product_ids.txt for Locust");
+    } catch (Exception e) {
+      System.err.println("Warning: Could not write product IDs to file: " + e.getMessage());
     }
 
     return productQueue;

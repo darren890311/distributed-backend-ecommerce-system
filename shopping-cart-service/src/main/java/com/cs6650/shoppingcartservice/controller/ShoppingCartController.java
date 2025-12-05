@@ -10,6 +10,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.net.URI;
+import java.util.concurrent.ThreadLocalRandom;
 
 @Slf4j
 @RestController
@@ -18,11 +19,25 @@ public class ShoppingCartController implements ShoppingCartApi {
 
   private final ShoppingCartService shoppingCartService;
 
+  /**
+   * Simulates business logic processing delay (100-1000ms)
+   * Required for Assignment 5 to stimulate auto-scaling
+   */
+  private void addBusinessLogicDelay() {
+    try {
+      long delay = 100 + ThreadLocalRandom.current().nextInt(900);
+      Thread.sleep(delay);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+    }
+  }
+
   @Override
   @PostMapping("/shopping-cart")
   public ResponseEntity<CreateShoppingCart201Response> createShoppingCart(
       @RequestBody CreateShoppingCartRequest request) {
 
+    addBusinessLogicDelay();
     log.info("Creating shopping cart for customer: {}", request.getCustomerId());
 
     try {
@@ -46,6 +61,7 @@ public class ShoppingCartController implements ShoppingCartApi {
       @PathVariable("shoppingCartId") Integer shoppingCartId,
       @RequestBody AddItemsToCartRequest request) {
 
+    addBusinessLogicDelay();
     log.info("Adding items to cart {}: product={}, quantity={}",
         shoppingCartId, request.getProductId(), request.getQuantity());
 
@@ -60,6 +76,7 @@ public class ShoppingCartController implements ShoppingCartApi {
       @PathVariable("shoppingCartId") Integer shoppingCartId,
       @RequestBody CheckoutCartRequest request) {
 
+    addBusinessLogicDelay();
     log.info("Checking out cart {}", shoppingCartId);
 
     try {
@@ -72,8 +89,17 @@ public class ShoppingCartController implements ShoppingCartApi {
       response.setOrderId(orderId);
 
       return ResponseEntity.ok(response);
+    } catch (ShoppingCartService.PaymentDeclinedException
+           | ShoppingCartService.CartNotFoundException
+           | ShoppingCartService.InvalidCartStateException
+           | ShoppingCartService.ServiceCommunicationException e) {
+      // Re-throw these specific exceptions to be handled by @ExceptionHandler methods
+      throw e;
     } catch (Exception e) {
-      throw new RuntimeException(e);
+      // Log and wrap unexpected exceptions
+      log.error("Unexpected error during checkout: {}", e.getMessage(), e);
+      throw new ShoppingCartService.ServiceCommunicationException(
+          "Checkout failed due to unexpected error: " + e.getMessage(), e);
     }
   }
 

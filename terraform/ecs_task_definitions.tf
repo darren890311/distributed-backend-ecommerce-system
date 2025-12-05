@@ -18,7 +18,7 @@ resource "aws_ecs_task_definition" "product_service" {
   container_definitions = jsonencode([
     {
       name      = "product-service"
-      image     = "${aws_ecr_repository.product_service.repository_url}:latest"
+      image     = "${data.aws_ecr_repository.product_service.repository_url}:latest"
       essential = true
 
       portMappings = [
@@ -69,7 +69,7 @@ resource "aws_ecs_task_definition" "product_service_failing" {
   container_definitions = jsonencode([
     {
       name      = "product-service-failing"
-      image     = "${aws_ecr_repository.product_service.repository_url}:latest"
+      image     = "${data.aws_ecr_repository.product_service.repository_url}:latest"
       essential = true
 
       portMappings = [
@@ -120,7 +120,7 @@ resource "aws_ecs_task_definition" "shopping_cart_service" {
   container_definitions = jsonencode([
     {
       name      = "shopping-cart-service"
-      image     = "${aws_ecr_repository.shopping_cart_service.repository_url}:latest"
+      image     = "${data.aws_ecr_repository.shopping_cart_service.repository_url}:latest"
       essential = true
 
       portMappings = [
@@ -136,19 +136,19 @@ resource "aws_ecs_task_definition" "shopping_cart_service" {
           value = "production"
         },
         {
-          name  = "RABBITMQ_HOST"
+          name  = "SPRING_RABBITMQ_HOST"
           value = aws_instance.rabbitmq.private_ip
         },
         {
-          name  = "RABBITMQ_PORT"
+          name  = "SPRING_RABBITMQ_PORT"
           value = "5672"
         },
         {
-          name  = "RABBITMQ_USERNAME"
+          name  = "SPRING_RABBITMQ_USERNAME"
           value = var.rabbitmq_username
         },
         {
-          name  = "RABBITMQ_PASSWORD"
+          name  = "SPRING_RABBITMQ_PASSWORD"
           value = var.rabbitmq_password
         },
         # IMPORTANT: Service IPs below are session-specific and must be updated
@@ -204,7 +204,7 @@ resource "aws_ecs_task_definition" "credit_card_authorizer" {
   container_definitions = jsonencode([
     {
       name      = "credit-card-authorizer"
-      image     = "${aws_ecr_repository.credit_card_authorizer.repository_url}:latest"
+      image     = "${data.aws_ecr_repository.credit_card_authorizer.repository_url}:latest"
       essential = true
 
       portMappings = [
@@ -218,8 +218,12 @@ resource "aws_ecs_task_definition" "credit_card_authorizer" {
         {
           name  = "SPRING_PROFILES_ACTIVE"
           value = "production"
+        },
+        {
+          name  = "SERVER_PORT"
+          value = "8080"
         }
-      ]
+      ] 
 
       logConfiguration = {
         logDriver = "awslogs"
@@ -251,7 +255,7 @@ resource "aws_ecs_task_definition" "warehouse_service" {
   container_definitions = jsonencode([
     {
       name      = "warehouse-service"
-      image     = "${aws_ecr_repository.warehouse_service.repository_url}:latest"
+      image     = "${data.aws_ecr_repository.warehouse_service.repository_url}:latest"
       essential = true
 
       environment = [

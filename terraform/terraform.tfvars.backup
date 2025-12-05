@@ -1,0 +1,26 @@
+  # AWS Configuration
+  aws_region = "us-east-1"
+  environment = "production"
+
+  # VPC Configuration
+  vpc_id = "vpc-02a1d7c7fb02cdb4a"
+
+  # Public Subnets (at least 2 in different AZs for ALB)
+  public_subnet_ids = ["subnet-0e6e71f2a75c1616a", "subnet-0e7b7953c62cd1d7c"]
+
+  # RabbitMQ Subnet
+  rabbitmq_subnet_id = "subnet-0e6e71f2a75c1616a"
+
+  # Key Pair (leave empty if not using SSH)
+  key_name = ""
+
+  # RabbitMQ Configuration
+  rabbitmq_instance_type = "t2.micro"
+  rabbitmq_username = "admin"
+  rabbitmq_password = "admin123"
+
+  # Monitoring
+  enable_detailed_monitoring = false
+  
+
+key_name = "cs6650-key2"
