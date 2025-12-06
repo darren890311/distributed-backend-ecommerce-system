@@ -27,19 +27,10 @@ public class WarehouseController {
     }
   }
 
-  @PostMapping("/reserve/{productId}")
-  public ResponseEntity<Void> reserve(
-      @PathVariable("productId") Integer productId,
-      @RequestParam("quantity") Integer quantity) {
-    addBusinessLogicDelay();
-    if (random.nextDouble() < 0.10) {
-      log.warn("RESERVE FAILED: Product {} (Quantity {}) - Insufficient inventory (Simulated)", productId, quantity);
-      return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
-    }
-
-    log.info("RESERVE SUCCESS: Product {} (Quantity {}) - Inventory reserved", productId, quantity);
-    return ResponseEntity.ok().build();
-  }
+  // NOTE: /reserve endpoint removed per Assignment 5 requirements
+  // - Inventory reservation no longer used
+  // - Failures now come from credit card service (10% decline rate)
+  // - Ship is handled via RabbitMQ (fire-and-forget) - see WarehouseConsumer
 
   @PostMapping("/ship/{productId}")
   public ResponseEntity<Void> ship(

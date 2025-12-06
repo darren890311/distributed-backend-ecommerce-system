@@ -1,634 +1,487 @@
-# CS6650 Assignment 5 - E-Commerce Microservices Infrastructure
+# CS6650 Assignment 5 - E-Commerce Microservices with Distributed Databases
 
-**Completed by:** Christy (Qingyi)  
-**Status:** Infrastructure deployed and tested - Ready for database integration and load testing
+**Team Members:** Christy (Qingyi), [Add other members]
 
 ---
 
 ## Table of Contents
 
-1. [What's Already Done](#whats-already-done)
-2. [How to Deploy](#how-to-deploy)
-3. [What Needs to be Completed](#what-needs-to-be-completed)
-4. [Architecture Overview](#architecture-overview)
-5. [Troubleshooting](#troubleshooting)
+1. [System Architecture](#system-architecture)
+2. [Database Design and CAP Trade-offs](#database-design-and-cap-trade-offs)
+3. [Microservices Implementation](#microservices-implementation)
+4. [Use Cases](#use-cases)
+5. [Load Testing Results](#load-testing-results)
+6. [Autoscaling Evidence](#autoscaling-evidence)
+7. [Assumptions and Reasoning](#assumptions-and-reasoning)
+8. [Deployment Instructions](#deployment-instructions)
 
 ---
 
-## What's Already Done
+## 1. System Architecture
 
-### Infrastructure Deployed
+### 1.1 Architecture Diagram
 
-**1. Docker Images in ECR:**
-- cs6650-product-service
-- cs6650-shopping-cart-service
-- cs6650-credit-card-authorizer
-- cs6650-warehouse-service
-- cs6650-kv-database (image ready, service not deployed)
+```
+                              Internet
+                                  |
+                                  v
+                    +---------------------------+
+                    |  Application Load         |
+                    |  Balancer (ALB)           |
+                    |  Port 80                  |
+                    +-------------+-------------+
+                                  |
+         +------------------------+------------------------+
+         |                        |                        |
+         v                        v                        v
++-----------------+    +-----------------+    +-----------------+
+| Product Service |    | Shopping Cart   |    | Credit Card     |
+|   (port 8082)   |    |   Service       |    |  Authorizer     |
+|                 |    |   (port 8084)   |    |   (port 8080)   |
+| Auto-scale:     |    |                 |    |                 |
+| CPU 70%, max 3  |    | Auto-scale:     |    | Auto-scale:     |
++---------+-------+    | Memory 70%,max 3|    | CPU 70%, max 3  |
+          |            +--------+--------+    +-----------------+
+          |                     |
+          |                     +------------------+
+          |                     |                  |
+          v                     v                  v
++-----------------+    +-----------------+    +-----------------+
+|  LEADERLESS KV  |    | LEADER-FOLLOWER |    |    RabbitMQ     |
+|   (port 8090)   |    |   KV (port 8080)|    |   (port 5672)   |
+|                 |    |                 |    +--------+--------+
+|   W=N, R=1      |    |   W=1, R=1      |             |
+|   Products      |    |   Shopping Carts|             v
++-----------------+    +-----------------+    +-----------------+
+                                              | Warehouse       |
+                                              |   Service       |
+                                              |   (port 8083)   |
+                                              |                 |
+                                              | Auto-scale:     |
+                                              | Memory 70%,max 3|
+                                              +-----------------+
+```
 
-**2. AWS Infrastructure (Terraform):**
-- Application Load Balancer with URL path-based routing
-- 5 ECS Fargate services (all tested and healthy)
-- RabbitMQ EC2 instance for asynchronous messaging
-- Auto-scaling configuration (1-3 instances per service)
-- Security groups and VPC networking
-- CloudWatch logging and monitoring
+### 1.2 Message Flow Between Services
 
-**3. Code Modifications:**
-- Added 100-1000ms random delays to all endpoints
-- Fixed RabbitMQ environment variables (SPRING_RABBITMQ_*)
-- Fixed Credit Card service port configuration (SERVER_PORT=8080)
-- All services tested locally and on AWS
+**Use Case 1: Add Item to Cart**
+```
+Client -> ALB -> Shopping Cart Service
+                    |
+                    +-> Leader-Follower KV (get cart)
+                    +-> Product Service -> Leaderless KV (validate product)
+                    +-> Leader-Follower KV (save cart)
+```
 
-**4. Load Testing:**
-- Locust test scripts created and tested locally
-- Results show proper endpoint functionality
-- Ready for AWS deployment testing
-
-**Current Status:**
-- AWS resources: DESTROYED (to save credits)
-- Terraform code: READY to redeploy in ~10 minutes
-- Estimated AWS cost: $0.25/hour
+**Use Case 2: Checkout**
+```
+Client -> ALB -> Shopping Cart Service
+                    |
+                    +-> Leader-Follower KV (get cart)
+                    +-> Credit Card Authorizer (90% approve)
+                    +-> RabbitMQ (publish order) -> Warehouse Service
+                    +-> Leader-Follower KV (mark checked out)
+```
 
 ---
 
-## How to Deploy
+## 2. Database Design and CAP Trade-offs
 
-### Prerequisites
+### 2.1 Database Selection Rationale
 
-1. AWS Learner Lab account with available credits
-2. Terraform installed locally
-3. AWS CLI configured
-4. AWS key pair (e.g., cs6650-key2)
+| Service | Database Type | Configuration | Rationale |
+|---------|---------------|---------------|-----------|
+| Product Service | Leaderless KV | W=N, R=1 | Read-heavy workload (90% reads), products rarely change |
+| Shopping Cart | Leader-Follower KV | W=1, R=1 | Write-heavy workload (60% writes), fast cart updates required |
 
-### Step 1: Get the Code
-```bash
-cd ~/Desktop/cs6650
-git clone <repo-url> cs6650-assignment5
-# Or if you already have it
-cd cs6650-assignment5
-git pull origin Qingyi
+### 2.2 Leaderless KV Database (Product Service)
+
+**Architecture:**
+- 5 peer nodes, any node can accept writes
+- Write coordinator forwards to all peers
+- Load balancer distributes reads across nodes
+
+**Configuration:**
+- W = N (all nodes): Write must reach ALL nodes before returning success
+- R = 1 (single node): Read from any single node via load balancer
+
+**Trade-off Analysis:**
+- Writes are slow (must propagate to all nodes)
+- Reads are fast (any node can respond immediately)
+- Suitable for products: rarely updated, frequently read
+
+### 2.3 Leader-Follower KV Database (Shopping Cart)
+
+**Architecture:**
+- Single leader accepts all writes
+- Multiple followers receive async replication
+- Dynamic follower registration via /internal/register endpoint
+
+**Configuration:**
+- W = 1: Leader stores locally and returns immediately (async replication)
+- R = 1: Read from leader only (always returns latest data)
+
+**Trade-off Analysis:**
+- Writes are fast (no waiting for replication)
+- Brief inconsistency window on followers (acceptable for personal cart data)
+- Suitable for carts: frequent updates, single-user data with no conflicts
+
+### 2.4 CAP Theorem Decision
+
+**Choice: AP (Availability + Partition Tolerance)**
+
+**Sacrificed: Strong Consistency (accepting Eventual Consistency)**
+
+**Justification:**
+1. Shopping carts are user-specific with no conflict risk between users
+2. Brief stale reads are acceptable; users will not notice sub-second delays
+3. "Add to Cart" operations must be fast (under 500ms) for good user experience
+4. Checkout validates final state from leader, ensuring accuracy when it matters
+5. System must continue operating during network partitions
+
+### 2.5 Transaction Stubs
+
+Both KV databases implement transaction stubs as required:
+
+```
+Endpoints:
+POST /api/kv/transaction/begin    - Prints "Transaction begun for key: X"
+POST /api/kv/transaction/end      - Prints "Transaction ended for key: X"
+POST /api/kv/transaction/abort    - Prints "Transaction aborted for key: X"
 ```
 
-### Step 2: Configure AWS Credentials
+Transaction calls are placed in ShoppingCartService.checkoutCart():
+- beginTransaction() called before payment authorization
+- endTransaction() called after successful checkout
+- abortTransaction() called on payment decline or any error
 
-From AWS Learner Lab, get your session credentials:
-```bash
-aws configure set aws_access_key_id YOUR_ACCESS_KEY
-aws configure set aws_secret_access_key YOUR_SECRET_KEY
-aws configure set aws_session_token YOUR_SESSION_TOKEN
-aws configure set region us-east-1
+---
 
-# Verify
-aws sts get-caller-identity
+## 3. Microservices Implementation
+
+### 3.1 Service Overview
+
+| Service | Port | Database | Key Functions |
+|---------|------|----------|---------------|
+| Product Service | 8082 | Leaderless KV | Create and retrieve products |
+| Shopping Cart Service | 8084 | Leader-Follower KV | Cart CRUD operations, checkout |
+| Credit Card Authorizer | 8080 | None | Authorize payments (90% approve, 10% decline) |
+| Warehouse Service | 8083 | None | Receive and process ship orders via RabbitMQ |
+
+### 3.2 Business Logic Delays
+
+All endpoints include simulated delays (100-1000ms linear random) to stimulate autoscaling:
+
+```java
+private void addBusinessLogicDelay() {
+    long delay = 100 + ThreadLocalRandom.current().nextInt(900);
+    Thread.sleep(delay);
+}
 ```
 
-### Step 3: Set Terraform Variables
+### 3.3 RabbitMQ Integration
+
+The Warehouse Service receives ship orders via RabbitMQ (fire-and-forget pattern):
+
+**Publisher (Shopping Cart Service):**
+```java
+rabbitTemplate.convertAndSend("checkoutQueue", orderMessage);
+```
+
+**Consumer (Warehouse Service):**
+```java
+@RabbitListener(queues = "checkoutQueue")
+public void receiveMessage(Message message) {
+    warehouseService.recordOrder(orderId, products);
+    channel.basicAck(deliveryTag, false);
+}
+```
+
+Ship operations always succeed as specified in the requirements.
+
+---
+
+## 4. Use Cases
+
+### 4.1 Use Case 1: Customer Adds Item to Cart
+
+**Prerequisites:**
+- Customer is logged in (customerId available in requests)
+
+**Steps:**
+1. Customer selects a product
+2. Customer chooses quantity
+3. Customer clicks "Add to Cart"
+4. System creates cart if none exists
+5. System validates product exists via Product Service
+6. System adds item to cart in Leader-Follower KV
+
+**Error Handling:**
+- Product not found: 404 response
+- Invalid quantity: 400 response
+- Cart not found: Creates new cart automatically
+
+**API Calls:**
+```
+POST /shopping-cart
+Body: {"customer_id": 123}
+
+POST /shopping-carts/{id}/addItem
+Body: {"product_id": 1, "quantity": 2}
+```
+
+### 4.2 Use Case 2: Customer Checks Out
+
+**Prerequisites:**
+- Customer has items in cart
+
+**Steps:**
+1. Customer enters credit card information
+2. Customer clicks "Checkout"
+3. System calls beginTransaction()
+4. Credit Card Service authorizes (90% approve, 10% decline)
+5. If approved: publish order to RabbitMQ for warehouse
+6. Mark cart as CHECKED_OUT in database
+7. Call endTransaction()
+
+**Error Handling:**
+- Payment declined (10%): 402 response, abortTransaction() called
+- Empty cart: 400 response
+- Cart not found: 404 response
+- Any error: abortTransaction() called
+
+**API Calls:**
+```
+POST /shopping-carts/{id}/checkout
+Body: {"credit_card_number": "1234-5678-9012-3456"}
+```
+
+---
+
+## 5. Load Testing Results
+
+### 5.1 Test Configuration
+
+| Parameter | Value |
+|-----------|-------|
+| Tool | Locust |
+| Concurrent Users | 500-1500 |
+| Spawn Rate | 50-100 users/second |
+| Test Duration | 40+ minutes |
+| Target | AWS Application Load Balancer |
+
+### 5.2 Results at 500 Concurrent Users
+
+```
+Type     Name                # Requests  # Fails  Median   95%ile   99%ile   Avg
+----------------------------------------------------------------------------------
+POST     UC1.1 Create Cart   24,066      0        1500ms   2300ms   2600ms   1524ms
+POST     UC1.2 Add Item      58,215      0        3600ms   4800ms   5300ms   3637ms
+POST     UC1.3 Checkout      23,702      0        2600ms   3600ms   4000ms   2564ms
+GET      UC2 View Product    45,578      0        1200ms   1900ms   2200ms   1225ms
+----------------------------------------------------------------------------------
+         Aggregated          151,561     0        2200ms   4500ms   5000ms   2408ms
+
+Throughput: 112.1 requests/second
+Failure Rate: 0%
+```
+
+### 5.3 Results at 1500 Concurrent Users
+
+At 1500 users, the system became overloaded:
+- 502 Bad Gateway errors occurred
+- This indicates backend services could not handle the request volume
+- This condition triggers autoscaling
+
+### 5.4 Latency Analysis
+
+Latencies are higher due to intentional stacking of business logic delays:
+
+| Operation | Delay Sources | Expected Range |
+|-----------|---------------|----------------|
+| Create Cart | Controller delay + KV write | 200-2000ms |
+| Add Item | Controller + KV read + Product validation + KV write | 400-4000ms |
+| Checkout | Controller + KV + Credit Card + RabbitMQ + KV | 500-5000ms |
+| View Product | Controller + KV read | 200-2000ms |
+
+---
+
+## 6. Autoscaling Evidence
+
+### 6.1 Autoscaling Configuration
+
+Two different metrics are used as required:
+
+| Service | Metric | Threshold | Max Instances |
+|---------|--------|-----------|---------------|
+| Product Service | CPU Utilization | 70% | 3 |
+| Shopping Cart Service | Memory Utilization | 70% | 3 |
+| Credit Card Authorizer | CPU Utilization | 70% | 3 |
+| Warehouse Service | Memory Utilization | 70% | 3 |
+
+### 6.2 Overload Condition
+
+At 1500 concurrent users:
+- 502 Bad Gateway errors indicate backend saturation
+- Services unable to process incoming requests fast enough
+- This is the trigger condition for autoscaling
+
+### 6.3 Scaling Behavior Analysis
+
+**Are all systems equally scaled?**
+
+No, and this is expected due to different load distributions:
+
+| Service | Requests per User Session | Relative Load |
+|---------|---------------------------|---------------|
+| Shopping Cart Service | 5+ requests | Highest |
+| Product Service | 3+ requests | Medium |
+| Credit Card Authorizer | 1 request | Low |
+| Warehouse Service | 1 async message | Lowest |
+
+**Primary Bottleneck: Shopping Cart Service**
+- Handles all cart operations (create, add, checkout)
+- Each Add Item also calls Product Service for validation
+- First service to return 502 errors under heavy load
+
+### 6.4 Recommendations With Additional Budget
+
+| Priority | Improvement | Estimated Cost | Expected Impact |
+|----------|-------------|----------------|-----------------|
+| 1 | Increase max instances to 10-20 | Low | Handle 5-10x more traffic |
+| 2 | Add autoscaling to database layer | Medium | Remove database bottleneck |
+| 3 | Increase container size (1024 CPU, 2048 MB) | Medium | Each instance handles more requests |
+| 4 | Add Redis caching for product data | Medium | Reduce database load significantly |
+| 5 | Multi-AZ deployment | High | Improved availability and fault tolerance |
+
+---
+
+## 7. Assumptions and Reasoning
+
+### 7.1 Workload Assumptions
+
+| Assumption | Value | Reasoning |
+|------------|-------|-----------|
+| Average items per cart | 2-5 | Log-normal distribution; most customers buy few items |
+| Checkout completion rate | 70% of sessions | Remaining 30% browse without purchasing |
+| Product catalog size | 1,000 products | Pre-loaded by Java client before load testing |
+| Product update frequency | 1-2 per day | Catalog changes infrequently in typical e-commerce |
+| Cart modification frequency | Multiple per session | Users frequently add and remove items |
+
+### 7.2 Read/Write Ratios
+
+| Service | Read Percentage | Write Percentage | Justification |
+|---------|-----------------|------------------|---------------|
+| Product Service | 90% | 10% | Catalog browsing dominates; products rarely updated |
+| Shopping Cart Service | 40% | 60% | Cart modifications (add/remove/update) dominate |
+
+### 7.3 Use Case Distribution in Load Testing
+
+```
+Locust Task Weights:
+- Shopping Session (Use Case 1 + 2): 70%
+- Product Browsing Only: 30%
+```
+
+This distribution reflects typical e-commerce behavior where many users browse but fewer complete purchases.
+
+---
+
+## 8. Deployment Instructions
+
+### 8.1 Prerequisites
+
+- AWS Learner Lab account with available credits
+- Terraform installed locally
+- AWS CLI configured with credentials
+- Python 3 with Locust installed
+- Java 17+ and Maven for load testing client
+
+### 8.2 Deploy Infrastructure
+
 ```bash
 cd terraform
-echo 'key_name = "cs6650-key2"' > terraform.tfvars
-```
-
-### Step 4: Deploy Infrastructure
-```bash
 terraform init
 terraform apply -auto-approve
+
+# Wait 5-10 minutes for all services to become healthy
 ```
 
-Wait 5-10 minutes for all services to become healthy.
+### 8.3 Pre-load Products
 
-### Step 5: Get Load Balancer URL
 ```bash
-terraform output alb_dns_name
+cd load-testing-client
+mvn exec:java -Dexec.mainClass="com.cs6650.loadtest.LoadTestingClient" -Dexec.args="aws"
+
+# This creates 1,000 products and exports products.json for Locust
 ```
 
-### Step 6: Verify Services Health
-```bash
-# Check all services are running
-aws ecs list-services --cluster ecommerce-cluster --region us-east-1
+### 8.4 Run Load Test
 
-# Check target health
-aws elbv2 describe-target-health \
-  --target-group-arn $(terraform output -raw shopping_cart_service_tg_arn) \
-  --region us-east-1
+```bash
+# From project root directory
+locust -f locustfile_aws.py --host=http://YOUR-ALB-DNS-NAME
+
+# Or headless mode with specific parameters
+locust -f locustfile_aws.py --headless -u 500 -r 50 --run-time 15m
 ```
 
-Wait for all targets to show `"State": "healthy"`
+### 8.5 Monitor Autoscaling
 
-### Step 7: Test Services
 ```bash
-export ALB_DNS=$(terraform output -raw alb_dns_name)
-
-# Health check
-curl http://$ALB_DNS/actuator/health
-
-# Shopping cart
-curl -X POST http://$ALB_DNS/shopping-cart \
-  -H "Content-Type: application/json" \
-  -d '{"customerId": "123"}'
+# Watch ECS service task counts
+watch -n 10 'aws ecs describe-services --cluster ecommerce-cluster \
+  --services product-service shopping-cart-service \
+  --query "services[*].[serviceName,runningCount]"'
 ```
 
-### Step 8: Destroy When Done
+### 8.6 Cleanup
+
 ```bash
+cd terraform
 terraform destroy -auto-approve
 ```
 
 ---
 
-## What Needs to be Completed
+## 9. Project Structure
 
-### Part 1: KV Database Deployment
-
-#### Step 1.1: Verify KV Database Image in ECR
-```bash
-aws ecr describe-images --repository-name cs6650-kv-database --region us-east-1
 ```
-
-#### Step 1.2: Create KV Database Terraform Configuration
-
-Create file `terraform/ecs_kv_database.tf`:
-```hcl
-# ECR Repository reference
-data "aws_ecr_repository" "kv_database" {
-  name = "cs6650-kv-database"
-}
-
-# Task Definition
-resource "aws_ecs_task_definition" "kv_database" {
-  family                   = "kv-database"
-  network_mode             = "awsvpc"
-  requires_compatibilities = ["FARGATE"]
-  cpu                      = "512"
-  memory                   = "1024"
-  execution_role_arn       = data.aws_iam_role.lab_role.arn
-  task_role_arn            = data.aws_iam_role.lab_role.arn
-
-  container_definitions = jsonencode([
-    {
-      name      = "kv-database"
-      image     = "${data.aws_ecr_repository.kv_database.repository_url}:latest"
-      essential = true
-
-      portMappings = [
-        {
-          containerPort = 8080
-          protocol      = "tcp"
-        }
-      ]
-
-      environment = [
-        {
-          name  = "SERVER_PORT"
-          value = "8080"
-        },
-        {
-          name  = "N_VALUE"
-          value = "3"
-        },
-        {
-          name  = "R_VALUE"
-          value = "2"
-        },
-        {
-          name  = "W_VALUE"
-          value = "2"
-        },
-        {
-          name  = "IS_LEADER"
-          value = "true"
-        }
-      ]
-
-      logConfiguration = {
-        logDriver = "awslogs"
-        options = {
-          "awslogs-group"         = aws_cloudwatch_log_group.ecs_logs.name
-          "awslogs-region"        = "us-east-1"
-          "awslogs-stream-prefix" = "kv-database"
-        }
-      }
-    }
-  ])
-}
-
-# ECS Service
-resource "aws_ecs_service" "kv_database" {
-  name            = "kv-database"
-  cluster         = aws_ecs_cluster.main.id
-  task_definition = aws_ecs_task_definition.kv_database.arn
-  desired_count   = 1
-  launch_type     = "FARGATE"
-
-  network_configuration {
-    subnets          = data.aws_subnet.public[*].id
-    security_groups  = [aws_security_group.kv_database_sg.id]
-    assign_public_ip = true
-  }
-}
-
-# Security Group
-resource "aws_security_group" "kv_database_sg" {
-  name        = "kv-database-sg"
-  description = "Security group for KV Database"
-  vpc_id      = data.aws_vpc.main.id
-
-  ingress {
-    description     = "HTTP from services"
-    from_port       = 8080
-    to_port         = 8080
-    protocol        = "tcp"
-    security_groups = [
-      aws_security_group.product_service_sg.id,
-      aws_security_group.shopping_cart_service_sg.id
-    ]
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-}
-```
-
-#### Step 1.3: Update Product and Shopping Cart Services
-
-Edit `ecs_task_definitions.tf` and add to both services' environment arrays:
-```hcl
-{
-  name  = "KVSTORE_LEADER_URL"
-  value = "http://REPLACE_WITH_KV_IP:8080"
-}
-```
-
-#### Step 1.4: Deploy and Get KV Database IP
-```bash
-# Deploy
-terraform apply -auto-approve
-
-# Get IP address
-KV_TASK_ARN=$(aws ecs list-tasks --cluster ecommerce-cluster \
-  --service-name kv-database --region us-east-1 \
-  --query 'taskArns[0]' --output text)
-
-KV_IP=$(aws ecs describe-tasks --cluster ecommerce-cluster \
-  --tasks $KV_TASK_ARN \
-  --region us-east-1 \
-  --query 'tasks[0].containers[0].networkInterfaces[0].privateIpv4Address' \
-  --output text)
-
-echo "KV Database IP: $KV_IP"
-
-# Update ecs_task_definitions.tf with this IP, then redeploy
-terraform apply -auto-approve
-```
-
-#### Step 1.5: Verify Database Connection
-```bash
-# Test endpoints that require database
-curl http://$ALB_DNS/products/1
-```
-
-### Part 2: Adjust Auto-Scaling Thresholds
-
-Current threshold is 70%, but testing showed CPU only reached ~50%.
-
-Edit `autoscaling.tf`:
-```bash
-# Lower threshold from 70 to 30
-sed -i 's/target_value       = 70/target_value       = 30/g' autoscaling.tf
-
-# Apply changes
-terraform apply -auto-approve
-```
-
-Alternatively, deploying the KV database will create real workload that naturally increases CPU usage.
-
-### Part 3: Load Testing with Locust
-
-#### Step 3.1: Pre-load 1000 Products
-
-Create `preload_products.py`:
-```python
-import requests
-import random
-
-ALB_DNS = "your-alb-dns.amazonaws.com"
-
-print("Pre-loading 1000 products...")
-for i in range(1, 1001):
-    product = {
-        "id": i,
-        "name": f"Product {i}",
-        "price": round(random.uniform(10, 500), 2),
-        "description": f"Description for product {i}"
-    }
-    response = requests.post(f"http://{ALB_DNS}/products", json=product)
-    if i % 100 == 0:
-        print(f"Created {i} products")
-
-print("Done!")
-```
-```bash
-python preload_products.py
-```
-
-#### Step 3.2: Update Locust Configuration
-
-Update `locustfile.py` with actual ALB DNS:
-```python
-class EcommerceCustomer(HttpUser):
-    tasks = [CustomerShoppingSession]
-    wait_time = between(2, 5)
-    host = "http://your-actual-alb-dns.amazonaws.com"  # UPDATE THIS
-```
-
-#### Step 3.3: Run Load Test
-```bash
-locust -f locustfile.py
-```
-
-Open browser: http://localhost:8089
-
-**Test Configuration:**
-- Start with 20 users, spawn rate 2
-- Gradually increase to 50, then 100 users
-- Monitor for 5-10 minutes at each level
-
-#### Step 3.4: Monitor Auto-Scaling
-
-Watch ECS services scale:
-```bash
-# Monitor service scaling
-watch -n 5 'aws ecs describe-services --cluster ecommerce-cluster \
-  --services shopping-cart-service --region us-east-1 \
-  --query "services[0].{Desired:desiredCount,Running:runningCount}"'
-
-# Monitor CPU metrics
-aws cloudwatch get-metric-statistics \
-  --namespace AWS/ECS \
-  --metric-name CPUUtilization \
-  --dimensions Name=ServiceName,Value=shopping-cart-service Name=ClusterName,Value=ecommerce-cluster \
-  --start-time $(date -u -d '10 minutes ago' +%Y-%m-%dT%H:%M:%S) \
-  --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
-  --period 60 \
-  --statistics Average,Maximum \
-  --region us-east-1
-```
-
-#### Step 3.5: Capture Evidence
-
-Take screenshots of:
-- ECS console showing 2-3 tasks running per service
-- CloudWatch metrics showing CPU/Memory increasing
-- Locust dashboard showing request statistics
-- Target Group health showing multiple healthy targets
-
-### Part 4: Documentation
-
-Document the following in your assignment report:
-
-**1. Database Design Choices:**
-- Replication strategy (Leader-based vs Leaderless)
-- N/R/W values and reasoning
-- CAP trade-off decision and justification
-- Based on Assignment 4 results
-
-**2. Workload Assumptions:**
-- Use case distribution (70% add to cart, 30% checkout)
-- Product selection distribution
-- Items per cart (average 3-5)
-- Customer think time between actions
-- Read/write ratio per service
-
-**3. Auto-Scaling Results:**
-- Which service scaled first
-- CPU/Memory thresholds reached
-- Time to scale from 1 to 3 instances
-- Bottleneck analysis
-- What would you do with more resources
-
----
-
-## Architecture Overview
-
-### Current Architecture
-```
-                    Internet
-                        |
-                        v
-        +-------------------------------+
-        |  Application Load Balancer    |
-        |        (Port 80)               |
-        +---------------+---------------+
-                        |
-        +---------------+-----------------+
-        |               |                 |
-        v               v                 v
-+--------------+  +--------------+  +--------------+
-|   Product    |  | Shopping Cart|  | Credit Card  |
-|   Service    |  |   Service    |  |  Authorizer  |
-| (ECS Fargate)|  | (ECS Fargate)|  | (ECS Fargate)|
-|   Port 8082  |  |   Port 8084  |  |   Port 8080  |
-|              |  |      |        |  |              |
-| Auto-scale   |  |      |        |  | Auto-scale   |
-|  1-3 (CPU)   |  |      |        |  |  1-3 (CPU)   |
-+--------------+  +------+--------+  +--------------+
-                        |
-                        v
-                +--------------+
-                |   RabbitMQ   |
-                |  (EC2 t2.micro)|
-                |   Port 5672  |
-                +------+-------+
-                       |
-                       v
-                +--------------+
-                |  Warehouse   |
-                |   Service    |
-                | (ECS Fargate)|
-                |   Port 9083  |
-                |              |
-                | Auto-scale   |
-                | 1-3 (Memory) |
-                +--------------+
-```
-
-### Target Architecture (After Database Integration)
-```
-                    Internet
-                        |
-                        v
-        +-------------------------------+
-        |  Application Load Balancer    |
-        +---------------+---------------+
-                        |
-        +---------------+-------------+
-        |               |             |
-        v               v             v
-+--------------+  +--------------+  +--------------+
-|   Product    |  | Shopping Cart|  | Credit Card  |
-|   Service    |  |   Service    |  |  Authorizer  |
-+-------+------+  +------+-------+  +--------------+
-        |                |
-        |                +-------------+
-        |                              |
-        v                              v
-+------------------------------+  +--------------+
-|     KV Database Cluster      |  |   RabbitMQ   |
-| (Leader or Leaderless)       |  +------+-------+
-|    N=3, R=2, W=2             |         |
-+------------------------------+         v
-                                  +--------------+
-                                  |  Warehouse   |
-                                  |   Service    |
-                                  +--------------+
-```
-
-### ALB Routing Rules
-
-| URL Pattern | Target Service | Port | Priority |
-|-------------|----------------|------|----------|
-| /products/* | Product Service | 8082 | 100 |
-| /shopping-cart/* | Shopping Cart | 8084 | 200 |
-| /credit-card/* | Credit Card | 8080 | 300 |
-
----
-
-## Troubleshooting
-
-### Services Not Healthy
-
-Check logs:
-```bash
-aws logs tail /ecs/ecommerce --follow --region us-east-1 --since 5m
-```
-
-Check task status:
-```bash
-aws ecs describe-tasks --cluster ecommerce-cluster \
-  --tasks $(aws ecs list-tasks --cluster ecommerce-cluster \
-  --service-name shopping-cart-service --region us-east-1 \
-  --query 'taskArns[0]' --output text) \
-  --region us-east-1
-```
-
-Common issues:
-- RabbitMQ connection refused: Verify SPRING_RABBITMQ_* environment variables
-- Port mismatch: Ensure containerPort matches health check port
-- Image not found: Verify Docker images exist in ECR
-
-### Auto-Scaling Not Working
-
-Check CloudWatch metrics:
-```bash
-aws cloudwatch get-metric-statistics \
-  --namespace AWS/ECS \
-  --metric-name CPUUtilization \
-  --dimensions Name=ServiceName,Value=product-service Name=ClusterName,Value=ecommerce-cluster \
-  --start-time $(date -u -d '10 minutes ago' +%Y-%m-%dT%H:%M:%S) \
-  --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
-  --period 60 \
-  --statistics Average,Maximum \
-  --region us-east-1
-```
-
-Solutions:
-- Lower threshold from 70% to 30%
-- Increase load test intensity
-- Deploy KV database for real workload
-
-### Terraform Errors
-
-Security group already exists:
-```bash
-terraform import aws_security_group.alb_sg <sg-id>
-```
-
-Target group already exists:
-```bash
-aws elbv2 delete-target-group --target-group-arn <arn>
-```
-
-State file issues:
-```bash
-rm -rf .terraform terraform.tfstate*
-terraform init
-```
-
-### KV Database Connection Issues
-
-Get database IP:
-```bash
-KV_IP=$(aws ecs describe-tasks --cluster ecommerce-cluster \
-  --tasks $(aws ecs list-tasks --cluster ecommerce-cluster \
-  --service-name kv-database --region us-east-1 \
-  --query 'taskArns[0]' --output text) \
-  --region us-east-1 \
-  --query 'tasks[0].containers[0].networkInterfaces[0].privateIpv4Address' \
-  --output text)
-
-echo "KV Database IP: $KV_IP"
-```
-
-Common issues:
-- Connection refused: Security group not allowing traffic
-- Timeout: Database not healthy yet (wait 2-3 minutes)
-- Wrong URL: Verify IP in service environment variables
-
----
-
-## Key Files
-```
-terraform/
-├── README.md                    # This guide
-├── alb.tf                       # Load balancer
-├── autoscaling.tf               # Auto-scaling policies
-├── ecs_cluster.tf               # ECS cluster
-├── ecs_services.tf              # Service definitions
-├── ecs_task_definitions.tf      # Task configurations
-├── ecs_kv_database.tf           # [TO BE CREATED]
-├── ecr.tf                       # Container registry
-├── outputs.tf                   # Terraform outputs
-├── rabbitmq.tf                  # RabbitMQ instance
-├── rabbitmq_security_groups.tf  # RabbitMQ networking
-├── variables.tf                 # Input variables
-└── terraform.tfvars             # Configuration values
+cs6650-assignment5/
++-- product-service/              # Product microservice
++-- shopping-cart-service/        # Shopping cart microservice
++-- credit-card-authorizer/       # Credit card microservice
++-- warehouse-service/            # Warehouse microservice (RabbitMQ consumer)
++-- kv-tx-stubs/                  # Leader-Follower KV database
++-- leaderless-kv/                # Leaderless KV database
++-- load-testing-client/          # Java client for product pre-loading
++-- locustfile_aws.py             # Locust load test script
++-- products.json                 # Product IDs exported for Locust
++-- terraform/                    # AWS infrastructure as code
+    +-- autoscaling.tf            # Autoscaling policies
+    +-- ecs_task_definitions.tf   # ECS task definitions
+    +-- ecs_kv_database.tf        # Leader-Follower KV deployment
+    +-- ecs_leaderless_kv.tf      # Leaderless KV deployment
+    +-- rabbitmq.tf               # RabbitMQ EC2 instance
 ```
 
 ---
 
-## Assignment Requirements
+## 10. Requirements Compliance
 
-| Requirement | Status | Location |
+| Requirement | Status | Evidence |
 |-------------|--------|----------|
-| 5 microservices | Completed | ecs_services.tf |
-| Load balancer | Completed | alb.tf |
-| Message queue | Completed | rabbitmq.tf |
-| KV database | To be added | ecs_kv_database.tf |
-| Auto-scaling | Completed | autoscaling.tf |
-| 2 use cases | To be tested | locustfile.py |
-| Load testing | To be done | Locust + screenshots |
-| Documentation | In progress | Assignment document |
+| Four microservices with business logic | Complete | Product, Cart, CreditCard, Warehouse services |
+| Distributed KV database | Complete | Leader-Follower and Leaderless implementations |
+| Transaction stubs (begin/end/abort) | Complete | Implemented in both KV stores, called in ShoppingCartService |
+| Business logic delays (100-1000ms) | Complete | addBusinessLogicDelay() in all controllers |
+| RabbitMQ for warehouse ship | Complete | WarehouseConsumer listens to checkoutQueue |
+| Credit Card 90% approve / 10% decline | Complete | AUTHORIZATION_RATE = 0.9 |
+| Pre-load 1000 products | Complete | Java LoadTestingClient creates products |
+| Locust load testing with 2 use cases | Complete | locustfile_aws.py implements both use cases |
+| Autoscaling with 2 different metrics | Complete | CPU and Memory, max 3 instances |
+| CAP trade-off documented | Complete | AP chosen, consistency sacrificed |
+| Terraform deployment | Complete | Full infrastructure as code |
 
 ---
 
-## Team Division of Work
-
-**Already Done (Infrastructure):**
-- Complete Terraform infrastructure code
-- All Docker images in ECR
-- ALB with routing rules
-- 5 ECS services deployed and tested
-- Auto-scaling configuration
-- RabbitMQ message queue
-- Locust test scripts created
-
-**What needs to be done (Database & Testing):**
-- Deploy KV database service
-- Connect services to database
-- Run load tests with Locust
-- Capture auto-scaling evidence
-- Document database design decisions
-- Document workload assumptions

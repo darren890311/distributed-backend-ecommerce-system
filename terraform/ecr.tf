@@ -5,6 +5,10 @@
     name = "cs6650-kv-database"
   }
 
+  data "aws_ecr_repository" "leaderless_kv" {
+    name = "cs6650-leaderless-kv"
+  }
+
   data "aws_ecr_repository" "product_service" {
     name = "cs6650-product-service"
   }

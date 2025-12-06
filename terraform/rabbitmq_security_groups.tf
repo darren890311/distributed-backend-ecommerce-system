@@ -134,11 +134,20 @@ resource "aws_security_group" "warehouse_service_sg" {
   description = "Security group for Warehouse Service instances"
   vpc_id      = var.vpc_id
 
+  # HTTP traffic from ALB for reserve/ship endpoints (port 8083)
+  ingress {
+    description     = "HTTP from ALB"
+    from_port       = 8083
+    to_port         = 8083
+    protocol        = "tcp"
+    security_groups = [aws_security_group.alb_sg.id]
+  }
+
   # HTTP traffic for health checks and monitoring (optional)
   ingress {
-    description = "HTTP for health checks"
-    from_port   = 8080
-    to_port     = 8080
+    description = "HTTP for health checks from management"
+    from_port   = 8083
+    to_port     = 8083
     protocol    = "tcp"
     cidr_blocks = var.management_cidr_blocks
   }

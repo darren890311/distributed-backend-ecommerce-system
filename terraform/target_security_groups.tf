@@ -107,6 +107,15 @@ resource "aws_security_group" "inter_service_sg" {
     security_groups = [aws_security_group.shopping_cart_service_sg.id]
   }
 
+  # Warehouse Service (8083) accessible from Shopping Cart
+  ingress {
+    description     = "Warehouse Service from Shopping Cart"
+    from_port       = 8083
+    to_port         = 8083
+    protocol        = "tcp"
+    security_groups = [aws_security_group.shopping_cart_service_sg.id]
+  }
+
   # Allow all outbound traffic
   egress {
     description = "Allow all outbound traffic"

@@ -109,12 +109,32 @@ public class LoadTestingClient {
       }
     }
 
-    // Export product IDs to file for Locust load testing
+    // Export product IDs to JSON file for Locust load testing
+    // Write to parent directory (cs6650-assignment5/) where locustfile_aws.py is located
+    String jsonPath = "../products.json";
+    try (java.io.PrintWriter jsonWriter = new java.io.PrintWriter(jsonPath)) {
+      StringBuilder json = new StringBuilder();
+      json.append("{\n  \"product_ids\": [");
+      for (int i = 0; i < productIds.size(); i++) {
+        if (i > 0) json.append(", ");
+        if (i % 20 == 0) json.append("\n    ");
+        json.append(productIds.get(i));
+      }
+      json.append("\n  ],\n  \"count\": ").append(productIds.size());
+      json.append(",\n  \"timestamp\": \"").append(java.time.Instant.now()).append("\"");
+      json.append("\n}\n");
+      jsonWriter.print(json.toString());
+      System.out.println("Product IDs exported to " + jsonPath + " for Locust (JSON format)");
+    } catch (Exception e) {
+      System.err.println("Warning: Could not write products.json: " + e.getMessage());
+    }
+
+    // Also write simple text file as backup
     try (java.io.PrintWriter writer = new java.io.PrintWriter("/tmp/product_ids.txt")) {
       for (Integer id : productIds) {
         writer.println(id);
       }
-      System.out.println("Product IDs exported to /tmp/product_ids.txt for Locust");
+      System.out.println("Product IDs also exported to /tmp/product_ids.txt");
     } catch (Exception e) {
       System.err.println("Warning: Could not write product IDs to file: " + e.getMessage());
     }

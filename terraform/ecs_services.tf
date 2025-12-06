@@ -10,7 +10,10 @@ resource "aws_ecs_service" "product_service" {
 
   network_configuration {
     subnets          = var.public_subnet_ids
-    security_groups  = [aws_security_group.product_service_sg.id]
+    security_groups  = [
+      aws_security_group.product_service_sg.id,
+      aws_security_group.inter_service_sg.id
+    ]
     assign_public_ip = true
   }
 
@@ -33,7 +36,7 @@ resource "aws_ecs_service" "product_service_failing" {
   name            = "product-service-failing"
   cluster         = aws_ecs_cluster.main.id
   task_definition = aws_ecs_task_definition.product_service_failing.arn
-  desired_count   = 1
+  desired_count   = 0  # Disabled - only enable for fault tolerance testing
   launch_type     = "FARGATE"
 
   network_configuration {
@@ -100,10 +103,11 @@ resource "aws_ecs_service" "credit_card_authorizer" {
   network_configuration {
     subnets          = var.public_subnet_ids
     security_groups  = [
-      aws_security_group.credit_card_service_sg.id]
+      aws_security_group.credit_card_service_sg.id,
+      aws_security_group.inter_service_sg.id
+    ]
     assign_public_ip = true
   }
-
 
   load_balancer {
     target_group_arn = aws_lb_target_group.credit_card_service_tg.arn
@@ -119,7 +123,7 @@ resource "aws_ecs_service" "credit_card_authorizer" {
   }
 }
 
-# Warehouse Service (not load balanced - consumes from RabbitMQ)
+# Warehouse Service (load balanced for reserve/ship HTTP endpoints + RabbitMQ consumer)
 resource "aws_ecs_service" "warehouse_service" {
   name            = "warehouse-service"
   cluster         = aws_ecs_cluster.main.id
@@ -129,11 +133,23 @@ resource "aws_ecs_service" "warehouse_service" {
 
   network_configuration {
     subnets          = var.public_subnet_ids
-    security_groups  = [aws_security_group.warehouse_service_sg.id]
+    security_groups  = [
+      aws_security_group.warehouse_service_sg.id,
+      aws_security_group.inter_service_sg.id
+    ]
     assign_public_ip = true
   }
 
-  depends_on = [aws_instance.rabbitmq]
+  load_balancer {
+    target_group_arn = aws_lb_target_group.warehouse_service_tg.arn
+    container_name   = "warehouse-service"
+    container_port   = 8083
+  }
+
+  depends_on = [
+    aws_instance.rabbitmq,
+    aws_lb_listener.http
+  ]
 
   tags = {
     Name        = "warehouse-service"

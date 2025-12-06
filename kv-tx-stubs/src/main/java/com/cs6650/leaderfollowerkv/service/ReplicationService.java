@@ -1,9 +1,9 @@
 package com.cs6650.leaderfollowerkv.service;
 
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.client.RestTemplate;
-import org.springframework.http.ResponseEntity;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import com.cs6650.leaderfollowerkv.model.VersionedValue;
@@ -14,13 +14,19 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.*;
 
 /**
- * FIXED ReplicationService with correct quorum implementation
+ * REPLICATION SERVICE with DYNAMIC FOLLOWER REGISTRATION
  *
- * Key fixes:
- * 1. W=5: Sequential replication with delays (not parallel)
- * 2. W=1: Truly async (fire and forget)
- * 3. W=3: Correct quorum logic (no hang on failures)
- * 4. R=5: Reads from ALL 5 nodes (not just leader)
+ * This service handles write replication and read strategies.
+ * Now uses FollowerRegistryService for dynamic follower discovery
+ * instead of static configuration.
+ *
+ * Key features:
+ * 1. W=N: Sequential replication with delays
+ * 2. W=1: Async replication (fire and forget)
+ * 3. W=3: Quorum-based replication
+ * 4. R=N: Reads from ALL nodes
+ * 5. R=1: Local read only
+ * 6. DYNAMIC: Uses registered followers instead of static config
  */
 @Service
 public class ReplicationService {
@@ -30,22 +36,26 @@ public class ReplicationService {
   private final RestTemplate restTemplate;
   private final KVStore kvStore;
 
-  @Value("${kvstore.role}")
+  @Autowired
+  private FollowerRegistryService followerRegistry;
+
+  @Value("${kvstore.role:leader}")
   private String role;
 
-  @Value("${kvstore.followers}")
-  private List<String> followerUrls;
+  // Static fallback (used if no dynamic registration)
+  @Value("${kvstore.followers:}")
+  private List<String> staticFollowerUrls;
 
-  @Value("${kvstore.all-nodes}")
-  private List<String> allNodeUrls;
+  @Value("${kvstore.all-nodes:}")
+  private List<String> staticAllNodeUrls;
 
-  @Value("${kvstore.write-quorum}")
+  @Value("${kvstore.write-quorum:1}")
   private int W;
 
-  @Value("${kvstore.read-quorum}")
+  @Value("${kvstore.read-quorum:1}")
   private int R;
 
-  @Value("${kvstore.replication-delay-ms:200}")
+  @Value("${kvstore.replication-delay-ms:100}")
   private int REPLICATION_DELAY_MS;
 
   @Value("${server.port}")
@@ -57,50 +67,98 @@ public class ReplicationService {
   }
 
   // ========================================================================
+  // DYNAMIC FOLLOWER ACCESS
+  // ========================================================================
+
+  /**
+   * Get list of follower URLs - prefers dynamic registry, falls back to static
+   */
+  private List<String> getFollowerUrls() {
+    // First try dynamic registry
+    List<String> dynamicFollowers = followerRegistry.getFollowerUrls();
+    if (!dynamicFollowers.isEmpty()) {
+      logger.debug("Using {} dynamically registered followers", dynamicFollowers.size());
+      return dynamicFollowers;
+    }
+
+    // Fall back to static config
+    if (staticFollowerUrls != null && !staticFollowerUrls.isEmpty()) {
+      logger.debug("Using {} statically configured followers", staticFollowerUrls.size());
+      return staticFollowerUrls;
+    }
+
+    logger.warn("No followers available (dynamic or static)");
+    return Collections.emptyList();
+  }
+
+  /**
+   * Get list of all node URLs (leader + followers)
+   */
+  private List<String> getAllNodeUrls() {
+    String leaderUrl = String.format("http://localhost:%d", serverPort);
+
+    // First try dynamic registry
+    List<String> dynamicNodes = followerRegistry.getAllNodeUrls(leaderUrl);
+    if (dynamicNodes.size() > 1) { // More than just leader
+      logger.debug("Using {} dynamically registered nodes", dynamicNodes.size());
+      return dynamicNodes;
+    }
+
+    // Fall back to static config
+    if (staticAllNodeUrls != null && !staticAllNodeUrls.isEmpty()) {
+      logger.debug("Using {} statically configured nodes", staticAllNodeUrls.size());
+      return staticAllNodeUrls;
+    }
+
+    // Just return leader
+    return Collections.singletonList(leaderUrl);
+  }
+
+  // ========================================================================
   // WRITE REPLICATION STRATEGIES
   // ========================================================================
 
   /**
    * Main replication method - routes to correct strategy based on W
-   *
    */
   public void replicateWrite(String key, String value, long version, long timestamp)
       throws Exception {
 
-    if (W == 5) {
-      // Strategy 1: W=5 - Sequential replication to ALL followers
-      replicateToAllFollowersSequential(key, value, version, timestamp);
+    List<String> followers = getFollowerUrls();
+
+    if (followers.isEmpty()) {
+      logger.info("No followers registered - skipping replication");
+      return;
+    }
+
+    if (W >= followers.size() + 1) {
+      // W=N - Sequential replication to ALL followers
+      replicateToAllFollowersSequential(followers, key, value, version, timestamp);
 
     } else if (W == 1) {
-      // Strategy 2: W=1 - Async replication (fire and forget)
-      replicateAsync(key, value, version, timestamp);
-
-    } else if (W == 3) {
-      // Strategy 3: W=3 - Quorum-based replication
-      replicateToQuorum(key, value, version, timestamp);
+      // W=1 - Async replication (fire and forget)
+      replicateAsync(followers, key, value, version, timestamp);
 
     } else {
-      throw new IllegalStateException("Unsupported W value: " + W);
+      // W=quorum - Quorum-based replication
+      replicateToQuorum(followers, key, value, version, timestamp);
     }
   }
 
   /**
-   * Strategy 1: W=5 - SEQUENTIAL replication with delays
-   *
+   * Strategy: W=N - SEQUENTIAL replication with delays
    */
-  private void replicateToAllFollowersSequential(String key, String value, long version,
-      long timestamp) throws Exception {
+  private void replicateToAllFollowersSequential(List<String> followers, String key, String value,
+      long version, long timestamp) throws Exception {
 
-    logger.info("W=5: Starting SEQUENTIAL replication to {} followers", followerUrls.size());
+    logger.info("W={}: Starting SEQUENTIAL replication to {} followers", W, followers.size());
     long startTime = System.currentTimeMillis();
 
     int successCount = 0;
     List<String> failures = new ArrayList<>();
 
-    //  SEQUENTIAL replication with delays (not parallel!)
-    for (String followerUrl : followerUrls) {
+    for (String followerUrl : followers) {
       try {
-        // CRITICAL: Sleep BEFORE each replication to simulate network delay
         Thread.sleep(REPLICATION_DELAY_MS);
 
         boolean success = sendReplicationRequest(followerUrl, key, value, version, timestamp);
@@ -123,35 +181,37 @@ public class ReplicationService {
     }
 
     long duration = System.currentTimeMillis() - startTime;
-    logger.info("W=5: Sequential replication took {}ms", duration);
+    logger.info("W={}: Sequential replication took {}ms ({}/{} succeeded)",
+        W, duration, successCount, followers.size());
 
-    // W=5 requires ALL followers to succeed
-    if (successCount < followerUrls.size()) {
+    // W=N requires ALL followers to succeed
+    int required = followers.size();
+    if (successCount < required) {
       throw new Exception(
-          String.format("W=5 replication failed: %d/%d succeeded. Failures: %s",
-              successCount, followerUrls.size(), failures)
+          String.format("W=%d replication failed: %d/%d succeeded. Failures: %s",
+              W, successCount, required, failures)
       );
     }
 
-    logger.info("W=5: Successfully replicated to all {} followers", successCount);
+    logger.info("W={}: Successfully replicated to all {} followers", W, successCount);
   }
 
   /**
-   * Strategy 2: W=1 - Async replication (fire and forget)
+   * Strategy: W=1 - Async replication (fire and forget)
    */
-  private void replicateAsync(String key, String value, long version, long timestamp) {
-    logger.info("W=1: Starting ASYNC replication to {} followers", followerUrls.size());
+  private void replicateAsync(List<String> followers, String key, String value,
+      long version, long timestamp) {
+    logger.info("W=1: Starting ASYNC replication to {} followers", followers.size());
 
     // Fire and forget - don't wait for results
     CompletableFuture.runAsync(() -> {
-      for (String followerUrl : followerUrls) {
+      for (String followerUrl : followers) {
         try {
           Thread.sleep(REPLICATION_DELAY_MS);
           sendReplicationRequest(followerUrl, key, value, version, timestamp);
           logger.debug("  Async replicated to {}", followerUrl);
         } catch (Exception e) {
-          logger.warn("  Async replication failed to {}: {}",
-              followerUrl, e.getMessage());
+          logger.warn("  Async replication failed to {}: {}", followerUrl, e.getMessage());
         }
       }
     });
@@ -160,24 +220,20 @@ public class ReplicationService {
   }
 
   /**
-   * Strategy 3: W=3 - CORRECT quorum implementation
-   *
-   * FIX #1: Changed int version → long version
+   * Strategy: W=quorum - Quorum-based replication
    */
-  private void replicateToQuorum(String key, String value, long version, long timestamp)
-      throws Exception {
+  private void replicateToQuorum(List<String> followers, String key, String value,
+      long version, long timestamp) throws Exception {
 
     int requiredAcks = W - 1; // W-1 because leader is implicit
     logger.info("W={}: Starting quorum replication ({} ACKs required from {} followers)",
-        W, requiredAcks, followerUrls.size());
+        W, requiredAcks, followers.size());
 
-    //  FIXED: Use atomic counters, not just latch
     AtomicInteger successCount = new AtomicInteger(0);
     AtomicInteger completedCount = new AtomicInteger(0);
-    CountDownLatch latch = new CountDownLatch(1); // Signal quorum OR all done
+    CountDownLatch latch = new CountDownLatch(1);
 
-    // Send to ALL followers concurrently
-    for (String followerUrl : followerUrls) {
+    for (String followerUrl : followers) {
       CompletableFuture.supplyAsync(() -> {
         try {
           Thread.sleep(REPLICATION_DELAY_MS);
@@ -193,37 +249,32 @@ public class ReplicationService {
           int successes = successCount.incrementAndGet();
           logger.debug("  ✓ Quorum progress: {}/{} successes", successes, requiredAcks);
 
-          //  Quorum achieved!
           if (successes >= requiredAcks) {
             latch.countDown();
           }
         }
 
-        //  All attempts completed - signal even if quorum not met
-        if (completed >= followerUrls.size()) {
+        if (completed >= followers.size()) {
           latch.countDown();
         }
       });
     }
 
-    //  FIXED: Wait with timeout
     boolean signaled = latch.await(10, TimeUnit.SECONDS);
 
     if (!signaled) {
       throw new TimeoutException("Quorum replication timeout after 10 seconds");
     }
 
-    //  FIXED: Verify quorum was actually achieved
     int finalSuccesses = successCount.get();
     if (finalSuccesses < requiredAcks) {
       throw new Exception(
           String.format("W=%d quorum not met: %d/%d followers succeeded (required: %d)",
-              W, finalSuccesses, followerUrls.size(), requiredAcks)
+              W, finalSuccesses, followers.size(), requiredAcks)
       );
     }
 
-    logger.info("W={}: Quorum achieved ({}/{} followers)",
-        W, finalSuccesses, followerUrls.size());
+    logger.info("W={}: Quorum achieved ({}/{} followers)", W, finalSuccesses, followers.size());
   }
 
   // ========================================================================
@@ -236,38 +287,31 @@ public class ReplicationService {
   public VersionedValue handleRead(String key) throws Exception {
 
     if (R == 1) {
-      // Strategy 1: R=1 - Read from local node only
       return kvStore.get(key);
 
-    } else if (R == 5) {
-      // Strategy 2: R=5 - Read from ALL 5 nodes
-      return readFromAllNodes(key);
-
-    } else if (R == 3) {
-      // Strategy 3: R=3 - Read from quorum
-      return readFromQuorum(key);
-
     } else {
-      throw new IllegalStateException("Unsupported R value: " + R);
+      List<String> allNodes = getAllNodeUrls();
+
+      if (R >= allNodes.size()) {
+        return readFromAllNodes(allNodes, key);
+      } else {
+        return readFromQuorum(allNodes, key);
+      }
     }
   }
 
   /**
-   * Strategy 2: R=5 - Read from ALL 5 nodes (Leader + 4 Followers)
-   *
-   * FIX #3: Changed comparingInt → comparingLong
+   * Strategy: R=N - Read from ALL nodes
    */
-  private VersionedValue readFromAllNodes(String key) throws Exception {
-    logger.info("R=5: Reading from ALL {} nodes", allNodeUrls.size());
+  private VersionedValue readFromAllNodes(List<String> allNodes, String key) throws Exception {
+    logger.info("R={}: Reading from ALL {} nodes", R, allNodes.size());
 
     ConcurrentLinkedQueue<VersionedValue> results = new ConcurrentLinkedQueue<>();
-    CountDownLatch latch = new CountDownLatch(allNodeUrls.size());
+    CountDownLatch latch = new CountDownLatch(allNodes.size());
 
-    // Read from ALL nodes concurrently
-    for (String nodeUrl : allNodeUrls) {
+    for (String nodeUrl : allNodes) {
       CompletableFuture.supplyAsync(() -> {
         try {
-          // If this is current node, read locally
           if (isCurrentNode(nodeUrl)) {
             return kvStore.get(key);
           } else {
@@ -285,46 +329,39 @@ public class ReplicationService {
       });
     }
 
-    // Wait for all reads
     boolean completed = latch.await(5, TimeUnit.SECONDS);
 
     if (!completed) {
-      logger.warn("R=5: Read timeout, got {}/{} responses",
-          results.size(), allNodeUrls.size());
+      logger.warn("R={}: Read timeout, got {}/{} responses", R, results.size(), allNodes.size());
     }
 
     if (results.isEmpty()) {
-      return null; // Key not found anywhere
+      return null;
     }
 
-    // Return most recent version
-    // FIX #3: Changed comparingInt → comparingLong
     VersionedValue mostRecent = results.stream()
         .max(Comparator.comparingLong(VersionedValue::getVersion))
         .orElse(null);
 
-    logger.info("R=5: Read from {}/{} nodes, most recent version: {}",
-        results.size(), allNodeUrls.size(),
+    logger.info("R={}: Read from {}/{} nodes, most recent version: {}",
+        R, results.size(), allNodes.size(),
         mostRecent != null ? mostRecent.getVersion() : "null");
 
     return mostRecent;
   }
 
   /**
-   * Strategy 3: R=3 - Read from quorum
+   * Strategy: R=quorum - Read from quorum of nodes
    */
-  private VersionedValue readFromQuorum(String key) throws Exception {
+  private VersionedValue readFromQuorum(List<String> allNodes, String key) throws Exception {
     logger.info("R={}: Reading from quorum", R);
 
-    // Select only R nodes
-    List<String> selectedNodes = selectRandomNodes(R);
-    logger.info("R={}: Selected {} random nodes for quorum read", R, selectedNodes.size());  // ← FIX #3
+    List<String> selectedNodes = selectRandomNodes(allNodes, R);
 
     ConcurrentLinkedQueue<VersionedValue> results = new ConcurrentLinkedQueue<>();
     AtomicInteger completedCount = new AtomicInteger(0);
     CountDownLatch latch = new CountDownLatch(1);
 
-    // Read from selected nodes only
     for (String nodeUrl : selectedNodes) {
       CompletableFuture.supplyAsync(() -> {
         try {
@@ -342,73 +379,57 @@ public class ReplicationService {
         if (result != null) {
           results.add(result);
 
-          // Quorum achieved
           if (results.size() >= R) {
             latch.countDown();
           }
         }
 
-        // FIX #1: All selected nodes completed
-        if (completed >= selectedNodes.size()) {  // ← FIXED!
+        if (completed >= selectedNodes.size()) {
           latch.countDown();
         }
       });
     }
 
-    // Wait for quorum
     boolean signaled = latch.await(5, TimeUnit.SECONDS);
 
     if (!signaled || results.size() < R) {
       throw new Exception(
-          String.format("R=%d quorum not met: %d/%d nodes responded",
-              R, results.size(), R)
+          String.format("R=%d quorum not met: %d/%d nodes responded", R, results.size(), R)
       );
     }
 
-    // Return most recent
     VersionedValue mostRecent = results.stream()
         .max(Comparator.comparingLong(VersionedValue::getVersion))
         .orElse(null);
 
-    // FIX #2: Log selected nodes size
     logger.info("R={}: Quorum achieved ({}/{} nodes), version: {}",
-        R, results.size(), selectedNodes.size(),  // ← FIXED!
+        R, results.size(), selectedNodes.size(),
         mostRecent != null ? mostRecent.getVersion() : "null");
 
     return mostRecent;
   }
 
-
   // ========================================================================
   // HELPER METHODS
   // ========================================================================
 
-  /**
-   * NEW: Helper method to select N random nodes from all available nodes
-   */
-  private List<String> selectRandomNodes(int count) {
-    if (count > allNodeUrls.size()) {
-      logger.warn("Requested {} nodes but only {} available", count, allNodeUrls.size());
-      count = allNodeUrls.size();
+  private List<String> selectRandomNodes(List<String> nodes, int count) {
+    if (count > nodes.size()) {
+      count = nodes.size();
     }
-
-    List<String> nodes = new ArrayList<>(allNodeUrls);
-    Collections.shuffle(nodes);
-    return nodes.subList(0, count);
+    List<String> shuffled = new ArrayList<>(nodes);
+    Collections.shuffle(shuffled);
+    return shuffled.subList(0, count);
   }
 
-  /**
-   * Send replication request to a follower (legacy method)
-   */
   private boolean sendReplicationRequest(String followerUrl, String key, String value,
       long version, long timestamp) {
     try {
       String url = String.format("%s/internal/replicate", followerUrl);
-
       ReplicationRequest request = new ReplicationRequest(key, value, version, timestamp);
 
-      Map<String, Object> response = restTemplate.postForObject(
-          url, request, Map.class);
+      @SuppressWarnings("unchecked")
+      Map<String, Object> response = restTemplate.postForObject(url, request, Map.class);
 
       return response != null && Boolean.TRUE.equals(response.get("success"));
 
@@ -418,23 +439,20 @@ public class ReplicationService {
     }
   }
 
-  /**
-   * Send read request to a node
-   */
   private VersionedValue sendReadRequest(String nodeUrl, String key) {
     try {
       String url = String.format("%s/internal/read?key=%s", nodeUrl, key);
 
+      @SuppressWarnings("unchecked")
       Map<String, Object> response = restTemplate.getForObject(url, Map.class);
 
       if (response == null) {
         return null;
       }
 
-      // FIX #2: Properly cast version to long
       return new VersionedValue(
           (String) response.get("value"),
-          ((Number) response.get("version")).longValue(),  // ✅ FIXED
+          ((Number) response.get("version")).longValue(),
           ((Number) response.get("timestamp")).longValue()
       );
 
@@ -444,12 +462,8 @@ public class ReplicationService {
     }
   }
 
-  /**
-   * Check if URL refers to current node
-   */
   private boolean isCurrentNode(String nodeUrl) {
-    // Check if the nodeUrl matches current server port
-    return nodeUrl.contains(":" + serverPort);
+    return nodeUrl.contains(":" + serverPort) || nodeUrl.contains("localhost:" + serverPort);
   }
 
   // Getters

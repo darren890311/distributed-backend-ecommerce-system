@@ -1,7 +1,8 @@
 package com.cs6650.shoppingcartservice.service;
 
 import com.cs6650.shoppingcartservice.kvclient.KvStoreClient;
-import com.cs6650.shoppingcartservice.client.WarehouseServiceClient;
+// NOTE: WarehouseServiceClient removed - "reserve" endpoint dropped per Assignment 5
+// Shipping is now handled via RabbitMQ (fire-and-forget) at checkout time
 import com.cs6650.shoppingcartservice.model.ShoppingCart;
 import com.cs6650.shoppingcartservice.model.ShoppingCart.CartItem;
 import com.cs6650.shoppingcart.model.AddItemsToCartRequest;
@@ -31,7 +32,7 @@ import java.util.stream.Collectors;
 public class ShoppingCartService {
 
   private final KvStoreClient kvStoreClient;
-  private final WarehouseServiceClient warehouseClient;
+  // NOTE: WarehouseServiceClient removed - no longer calling "reserve" endpoint
   private final RestTemplate restTemplate;
   private final RabbitTemplate rabbitTemplate;
 
@@ -81,7 +82,10 @@ public class ShoppingCartService {
         kvStoreClient.abortTransaction(cartId);
         throw new ProductNotFoundException("Product not found: " + productId);
       }
-      warehouseClient.checkInventoryAndReserve(productId, quantity);
+      // NOTE: "reserve" endpoint dropped per Assignment 5 requirements
+      // - Inventory reservation removed; shipping handled via RabbitMQ at checkout
+      // - Credit card service provides random failures (10% decline rate)
+      // - RabbitMQ used for "ship" (fire-and-forget) at checkout time
 
       Optional<CartItem> existingItem = cart.getItems().stream()
           .filter(item -> item.getProductId().equals(productId))
@@ -97,7 +101,7 @@ public class ShoppingCartService {
 
       kvStoreClient.endTransaction(cartId);
 
-    } catch (InsufficientStockException | ProductNotFoundException e) {
+    } catch (ProductNotFoundException e) {
       throw e;
     } catch (Exception e) {
       log.error("Unexpected error during addItemsToCart for Cart {}: {}", cartId, e.getMessage());

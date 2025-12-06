@@ -185,6 +185,43 @@ resource "aws_lb_target_group" "credit_card_service_tg" {
   }
 }
 
+# Target Group for Warehouse Service (Port 8083)
+resource "aws_lb_target_group" "warehouse_service_tg" {
+  name        = "warehouse-service-tg"
+  port        = 8083
+  protocol    = "HTTP"
+  vpc_id      = var.vpc_id
+  target_type = "ip"
+
+  # Health check configuration
+  health_check {
+    enabled             = true
+    healthy_threshold   = 3
+    unhealthy_threshold = 3
+    timeout             = 5
+    interval            = 30
+    path                = "/warehouse/health"
+    protocol            = "HTTP"
+    matcher             = "200"
+  }
+
+  # Stickiness configuration
+  stickiness {
+    type            = "lb_cookie"
+    cookie_duration = 86400
+    enabled         = false
+  }
+
+  # Deregistration delay
+  deregistration_delay = 30
+
+  tags = {
+    Name        = "warehouse-service-tg"
+    Environment = var.environment
+    Service     = "warehouse-service"
+  }
+}
+
 # HTTP Listener (Port 80)
 resource "aws_lb_listener" "http" {
   load_balancer_arn = aws_lb.ecommerce_alb.arn
@@ -241,7 +278,7 @@ resource "aws_lb_listener_rule" "product_service_rule" {
 
   condition {
     path_pattern {
-      values = ["*/product*", "*/products*"]
+      values = ["/product*", "/products*", "*/product*", "*/products*"]
     }
   }
 
@@ -263,7 +300,7 @@ resource "aws_lb_listener_rule" "shopping_cart_service_rule" {
 
   condition {
     path_pattern {
-      values = ["*/shopping-cart*", "*/cart*"]
+      values = ["/shopping-cart*", "/cart*", "*/shopping-cart*", "*/cart*"]
     }
   }
 
@@ -285,13 +322,35 @@ resource "aws_lb_listener_rule" "credit_card_service_rule" {
 
   condition {
     path_pattern {
-      values = ["*/credit-card*", "*/payment*", "*/authorize*"]
+      values = ["/credit-card*", "*/credit-card*"]
     }
   }
 
   tags = {
     Name    = "credit-card-service-route"
     Service = "credit-card-authorizer"
+  }
+}
+
+# Listener Rule: Route traffic containing "warehouse" to Warehouse Service
+resource "aws_lb_listener_rule" "warehouse_service_rule" {
+  listener_arn = aws_lb_listener.http.arn
+  priority     = 400
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.warehouse_service_tg.arn
+  }
+
+  condition {
+    path_pattern {
+      values = ["/warehouse*", "*/warehouse*"]
+    }
+  }
+
+  tags = {
+    Name    = "warehouse-service-route"
+    Service = "warehouse-service"
   }
 }
 

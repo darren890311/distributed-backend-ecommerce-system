@@ -1,0 +1,79 @@
+version: '3.8'
+
+services:
+  # Nginx Load Balancer
+  nginx:
+    image: nginx:alpine
+    container_name: leaderless-nginx
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./nginx/nginx-docker.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/logs:/var/log/nginx
+    depends_on:
+      - node1
+      - node2
+      - node3
+      - node4
+      - node5
+    networks:
+      - leaderless-network
+
+  # Node 1
+  node1:
+    build: .
+    container_name: leaderless-node1
+    ports:
+      - "8081:8081"
+    environment:
+      - SPRING_PROFILES_ACTIVE=node1
+    networks:
+      - leaderless-network
+
+  # Node 2
+  node2:
+    build: .
+    container_name: leaderless-node2
+    ports:
+      - "8082:8082"
+    environment:
+      - SPRING_PROFILES_ACTIVE=node2
+    networks:
+      - leaderless-network
+
+  # Node 3
+  node3:
+    build: .
+    container_name: leaderless-node3
+    ports:
+      - "8083:8083"
+    environment:
+      - SPRING_PROFILES_ACTIVE=node3
+    networks:
+      - leaderless-network
+
+  # Node 4
+  node4:
+    build: .
+    container_name: leaderless-node4
+    ports:
+      - "8084:8084"
+    environment:
+      - SPRING_PROFILES_ACTIVE=node4
+    networks:
+      - leaderless-network
+
+  # Node 5
+  node5:
+    build: .
+    container_name: leaderless-node5
+    ports:
+      - "8085:8085"
+    environment:
+      - SPRING_PROFILES_ACTIVE=node5
+    networks:
+      - leaderless-network
+
+networks:
+  leaderless-network:
+    driver: bridge

@@ -36,6 +36,18 @@ resource "aws_ecs_task_definition" "product_service" {
         {
           name  = "PRODUCT_SERVICE_ERROR_RATE"
           value = "0.0"
+        },
+        # KV Database URL - Must be updated after deployment
+        # This IP address is session-specific and changes on each AWS Learner Lab restart.
+        # To get the correct IP after 'terraform apply':
+        # 1. Wait for services to start (~3 min)
+        # 2. Run: ./get-service-ips.sh
+        # 3. Update this value with the leaderless-kv service IP
+        # 4. Run: terraform apply
+        # 5. Restart product-service
+        {
+          name  = "KVSTORE_LEADER_URL"
+          value = "http://172.31.4.29:8090"
         }
       ]
 
@@ -151,26 +163,26 @@ resource "aws_ecs_task_definition" "shopping_cart_service" {
           name  = "SPRING_RABBITMQ_PASSWORD"
           value = var.rabbitmq_password
         },
-        # IMPORTANT: Service IPs below are session-specific and must be updated
-        # after each AWS Learner Lab restart. These IPs are for direct
-        # container-to-container communication within the VPC.
-        #
-        # To get new IPs after 'terraform apply':
-        # 1. Wait for services to start (~3 min)
-        # 2. Run: ./get-service-ips.sh (see RESTART_GUIDE.md)
-        # 3. Update these values
-        # 4. Run: terraform apply
-        # 5. Restart shopping-cart-service
-        #
-        # AWS Learner Lab limitation: Service Discovery not available,
-        # so we use direct IP addressing as workaround.
+        # Use ALB for inter-service communication to avoid IP address management issues
+        # ALB DNS name is stable and handles routing to healthy targets
         {
           name  = "SERVICES_PRODUCT_URL"
-          value = "http://172.31.16.160:8082"
+          value = "http://${aws_lb.ecommerce_alb.dns_name}"
         },
         {
           name  = "SERVICES_CREDIT_CARD_AUTHORIZER_URL"
-          value = "http://172.31.12.110:8080"
+          value = "http://${aws_lb.ecommerce_alb.dns_name}"
+        },
+        # KV Database still uses private IP (single instance, rarely restarts)
+        # If IP changes, update this value and redeploy shopping-cart-service
+        {
+          name  = "KVSTORE_LEADER_URL"
+          value = "http://172.31.15.83:8080"
+        },
+        # Warehouse Service URL - use ALB for stable DNS
+        {
+          name  = "SERVICES_WAREHOUSE_URL"
+          value = "http://${aws_lb.ecommerce_alb.dns_name}"
         }
       ]
 
@@ -258,10 +270,21 @@ resource "aws_ecs_task_definition" "warehouse_service" {
       image     = "${data.aws_ecr_repository.warehouse_service.repository_url}:latest"
       essential = true
 
+      portMappings = [
+        {
+          containerPort = 8083
+          protocol      = "tcp"
+        }
+      ]
+
       environment = [
         {
           name  = "SPRING_PROFILES_ACTIVE"
           value = "production"
+        },
+        {
+          name  = "SERVER_PORT"
+          value = "8083"
         },
         {
           name  = "SPRING_RABBITMQ_HOST"
@@ -281,7 +304,7 @@ resource "aws_ecs_task_definition" "warehouse_service" {
         },
         {
           name  = "SERVICES_PRODUCT_URL"
-          value = "http://172.31.16.160:8082"
+          value = "http://${aws_lb.ecommerce_alb.dns_name}"
         },
         {
           name  = "SPRING_RABBITMQ_LISTENER_SIMPLE_CONCURRENCY"
