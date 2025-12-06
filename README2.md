@@ -310,49 +310,111 @@ Latencies are higher due to intentional stacking of business logic delays:
 
 ### 6.1 Autoscaling Configuration
 
-Two different metrics are used as required:
+CPU-based target tracking policies configured for all services:
 
-| Service | Metric | Threshold | Max Instances |
-|---------|--------|-----------|---------------|
-| Product Service | CPU Utilization | 70% | 3 |
-| Shopping Cart Service | Memory Utilization | 70% | 3 |
-| Credit Card Authorizer | CPU Utilization | 70% | 3 |
-| Warehouse Service | Memory Utilization | 70% | 3 |
+| Service | Metric | Threshold | Min | Max |
+|---------|--------|-----------|-----|-----|
+| Product Service | CPU Utilization | 70% | 1 | 5 |
+| Shopping Cart Service | CPU Utilization | 70% | 1 | 5 |
+| Credit Card Authorizer | CPU Utilization | 70% | 1 | 5 |
+| Warehouse Service | CPU Utilization | 70% | 1 | 5 |
 
-### 6.2 Overload Condition
+### 6.2 Load Test Configuration
 
-At 1500 concurrent users:
-- 502 Bad Gateway errors indicate backend saturation
-- Services unable to process incoming requests fast enough
-- This is the trigger condition for autoscaling
+| Parameter | Value |
+|-----------|-------|
+| Tool | Locust |
+| Concurrent Users | 2,000 |
+| Spawn Rate | 100 users/second |
+| Duration | 15 minutes |
+| Target | AWS ALB |
 
-### 6.3 Scaling Behavior Analysis
+### 6.3 Overload Condition - Actual Results
 
-**Are all systems equally scaled?**
+| Metric | Value |
+|--------|-------|
+| Total Requests | 95,400 |
+| Failed Requests | 10,281 (~10.8%) |
+| Peak RPS | ~200 requests/sec |
 
-No, and this is expected due to different load distributions:
+### 6.4 Service Scaling Status (Final)
 
-| Service | Requests per User Session | Relative Load |
-|---------|---------------------------|---------------|
-| Shopping Cart Service | 5+ requests | Highest |
-| Product Service | 3+ requests | Medium |
-| Credit Card Authorizer | 1 request | Low |
-| Warehouse Service | 1 async message | Lowest |
+| Service | Initial Replicas | Final Replicas | Scaled? |
+|---------|------------------|----------------|---------|
+| shopping-cart-service | 1 | **5** | ✅ YES |
+| product-service | 1 | 1 | ❌ NO |
+| credit-card-authorizer | 1 | 1 | ❌ NO |
+| warehouse-service | 1 | 1 | ❌ NO |
 
-**Primary Bottleneck: Shopping Cart Service**
-- Handles all cart operations (create, add, checkout)
-- Each Add Item also calls Product Service for validation
-- First service to return 502 errors under heavy load
+### 6.5 Scaling Timeline
 
-### 6.4 Recommendations With Additional Budget
+- **18:32:23** - shopping-cart-service: 1 → 2 replicas (CPU exceeded 70%)
+- **18:38:23** - shopping-cart-service: 2 → 5 replicas (reached max capacity)
 
-| Priority | Improvement | Estimated Cost | Expected Impact |
-|----------|-------------|----------------|-----------------|
-| 1 | Increase max instances to 10-20 | Low | Handle 5-10x more traffic |
-| 2 | Add autoscaling to database layer | Medium | Remove database bottleneck |
-| 3 | Increase container size (1024 CPU, 2048 MB) | Medium | Each instance handles more requests |
-| 4 | Add Redis caching for product data | Medium | Reduce database load significantly |
-| 5 | Multi-AZ deployment | High | Improved availability and fault tolerance |
+### 6.6 Were All Systems Equally Scaled? **NO**
+
+Only the **shopping-cart-service** scaled up during the load test. This is expected behavior.
+
+### 6.7 Bottleneck Analysis
+
+The **shopping-cart-service** was identified as the primary bottleneck because:
+
+1. **Complex Transaction Orchestration**: Handles cart creation, item addition, and checkout with BEGIN/END/ABORT transaction semantics
+2. **Multi-Service Coordination**: Coordinates with KV database, Product service, Credit Card service, and RabbitMQ
+3. **Heavy State Management**: Maintains cart state across multiple operations
+4. **Synchronous Blocking**: Waits for responses from downstream services
+
+Other services remained at 1 replica because:
+- **Product Service**: Simple read operations with fast response times (~1.2s avg)
+- **Credit Card Authorizer**: Lightweight validation with simulated delays
+- **Warehouse Service**: Asynchronous processing via RabbitMQ (fire-and-forget)
+
+### 6.8 Locust Test Results by Endpoint
+
+| Endpoint | Requests | Failures | Avg Latency | P99 Latency |
+|----------|----------|----------|-------------|-------------|
+| UC1.1 Create Cart | 16,407 | 2,867 (17%) | 11.2s | 45s |
+| UC1.2 Add Item | 36,959 | 6,178 (17%) | 14.2s | 52s |
+| UC1.3 Checkout | 11,990 | 1,235 (10%) | 14.8s | 55s |
+| UC2 View Product | 30,044 | 1 (0%) | 1.2s | 8s |
+
+### 6.9 AWS CLI Commands for Evidence
+
+```bash
+# 1. Service Scaling Status
+aws ecs describe-services --cluster ecommerce-cluster \
+  --services product-service shopping-cart-service credit-card-authorizer warehouse-service \
+  --query "services[].{name:serviceName,desired:desiredCount,running:runningCount}" \
+  --output table --region us-east-1
+
+# 2. Scaling Activities (shows scale-out events)
+aws application-autoscaling describe-scaling-activities \
+  --service-namespace ecs --region us-east-1 \
+  --query "ScalingActivities[*].[ResourceId,Description,StartTime,StatusCode]" \
+  --output table
+
+# 3. Auto-Scaling Policies
+aws application-autoscaling describe-scaling-policies \
+  --service-namespace ecs --region us-east-1 \
+  --query "ScalingPolicies[*].[ResourceId,PolicyName,TargetTrackingScalingPolicyConfiguration.TargetValue]" \
+  --output table
+
+# 4. Scalable Targets (min/max capacity)
+aws application-autoscaling describe-scalable-targets \
+  --service-namespace ecs --region us-east-1 \
+  --query "ScalableTargets[*].[ResourceId,MinCapacity,MaxCapacity]" \
+  --output table
+```
+
+### 6.10 Recommendations With Additional Budget
+
+| Priority | Improvement | Expected Impact |
+|----------|-------------|-----------------|
+| 1 | Increase max instances to 10-20 | Handle 5-10x more traffic |
+| 2 | Scale KV database layer | Remove database bottleneck |
+| 3 | Add more RabbitMQ consumers | Faster order processing |
+| 4 | Reduce cooldown periods | Faster scale-out response |
+| 5 | Add Redis caching for product data | Reduce database load significantly |
 
 ---
 
