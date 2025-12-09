@@ -310,14 +310,16 @@ Latencies are higher due to intentional stacking of business logic delays:
 
 ### 6.1 Autoscaling Configuration
 
-CPU-based target tracking policies configured for all services:
+Two different metrics are used as required by the assignment:
 
 | Service | Metric | Threshold | Min | Max |
 |---------|--------|-----------|-----|-----|
-| Product Service | CPU Utilization | 70% | 1 | 5 |
-| Shopping Cart Service | CPU Utilization | 70% | 1 | 5 |
-| Credit Card Authorizer | CPU Utilization | 70% | 1 | 5 |
-| Warehouse Service | CPU Utilization | 70% | 1 | 5 |
+| Product Service | CPU Utilization | 70% | 1 | 3 |
+| Shopping Cart Service | Memory Utilization | 70% | 1 | 3 |
+| Credit Card Authorizer | CPU Utilization | 70% | 1 | 3 |
+| Warehouse Service | Memory Utilization | 70% | 1 | 3 |
+
+**Note:** During testing, we also added CPU-based scaling policies and increased max capacity to 5 to demonstrate more scaling headroom.
 
 ### 6.2 Load Test Configuration
 
