@@ -65,7 +65,7 @@ resource "aws_ecs_service" "shopping_cart_service" {
   name            = "shopping-cart-service"
   cluster         = aws_ecs_cluster.main.id
   task_definition = aws_ecs_task_definition.shopping_cart_service.arn
-  desired_count   = 1
+  desired_count   = 2  # Increased from 1 for write-heavy workload
   launch_type     = "FARGATE"
 
   network_configuration {
