@@ -118,13 +118,13 @@ resource "aws_lb_target_group" "shopping_cart_service_tg" {
   target_type = "ip"
 
 
-  # Health check configuration
+  # Health check configuration - tuned for faster failure detection
   health_check {
     enabled             = true
-    healthy_threshold   = 3
-    unhealthy_threshold = 3
-    timeout             = 5
-    interval            = 30
+    healthy_threshold   = 2     # Faster healthy detection (reduced from 3)
+    unhealthy_threshold = 2     # Faster unhealthy detection (reduced from 3)
+    timeout             = 3     # Shorter timeout (reduced from 5)
+    interval            = 10    # More frequent checks (reduced from 30)
     path                = "/actuator/health"
     protocol            = "HTTP"
     matcher             = "200"
@@ -137,8 +137,8 @@ resource "aws_lb_target_group" "shopping_cart_service_tg" {
     enabled         = false
   }
 
-  # Deregistration delay
-  deregistration_delay = 30
+  # Deregistration delay - faster removal of unhealthy instances
+  deregistration_delay = 15  # Reduced from 30
 
   tags = {
     Name        = "shopping-cart-service-tg"
