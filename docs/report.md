@@ -119,7 +119,7 @@ tasks = {
 
 ---
 
-## 3. Choice of Database Design (10 points)
+## 3. Choice of Database Design 
 
 Our system employs custom-built distributed key-value databases for both Product and Shopping Cart services. This design choice was driven by three factors:
 
@@ -545,7 +545,7 @@ This 4-step chain explains the ~5s latency under load.
 
 ---
 
-## 6. Evidence of Autoscaling (10 points)
+## 6. Evidence of Autoscaling 
 
 ### 6.1 Autoscaling Configuration (Terraform)
 
