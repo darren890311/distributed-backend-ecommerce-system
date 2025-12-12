@@ -746,13 +746,3 @@ This project demonstrates a production-ready distributed e-commerce system that 
 5. **Iterative load testing reveals tuning opportunities** - Testing at 300→500→1000→1500→2000 users allowed us to identify and fix autoscaling issues.
 
 The system successfully handled 340,203 requests at 461.9 RPS with 2,000 concurrent users. After tuning autoscaling thresholds, we achieved a **0.08% failure rate** with proactive scaling, demonstrating that the architecture scales horizontally under load while maintaining stability.
-
----
-
-## 9. Team Contributions
-
-| Team Member | Responsibilities                                                  |
-|-------------|-------------------------------------------------------------------|
-| Qingyi Tian | Infrastructure, Terraform, Autoscaling, Load Testing, Documentation |
-| Yining Shen | KV Database Implementation, Replication Logic, Documentation      |
-| Chih-Hsing Hsieh | Microservices, RabbitMQ Integration，Terraform, Load Testing       |

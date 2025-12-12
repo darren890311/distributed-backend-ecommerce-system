@@ -37,7 +37,7 @@
 |   (port 8082)   |    |   Service       |    |  Authorizer     |
 |                 |    |   (port 8084)   |    |   (port 8080)   |
 | Auto-scale:     |    |                 |    |                 |
-| CPU 85%, max 3  |    | Auto-scale:     |    | Auto-scale:     |
+| CPU 30%, max 3  |    | Auto-scale:     |    | Auto-scale:     |
 +---------+-------+    | CPU+Mem 50%,max5|    | CPU 70%, max 3  |
           |            +--------+--------+    +-----------------+
           |                     |
@@ -263,33 +263,32 @@ Body: {"credit_card_number": "1234-5678-9012-3456"}
 | Parameter | Value |
 |-----------|-------|
 | Tool | Locust |
-| Concurrent Users | 500-1500 |
-| Spawn Rate | 50-100 users/second |
-| Test Duration | 40+ minutes |
+| Concurrent Users | 300 → 500 → 1000 → 1500 → 2000 |
+| Spawn Rate | 10-100 users/second |
+| Test Duration | Multiple sessions |
 | Target | AWS Application Load Balancer |
 
-### 5.2 Results at 500 Concurrent Users
+### 5.2 Incremental Load Testing Results
 
-```
-Type     Name                # Requests  # Fails  Median   95%ile   99%ile   Avg
-----------------------------------------------------------------------------------
-POST     UC1.1 Create Cart   24,066      0        1500ms   2300ms   2600ms   1524ms
-POST     UC1.2 Add Item      58,215      0        3600ms   4800ms   5300ms   3637ms
-POST     UC1.3 Checkout      23,702      0        2600ms   3600ms   4000ms   2564ms
-GET      UC2 View Product    45,578      0        1200ms   1900ms   2200ms   1225ms
-----------------------------------------------------------------------------------
-         Aggregated          151,561     0        2200ms   4500ms   5000ms   2408ms
+We performed systematic incremental load testing to validate system stability at each level:
 
-Throughput: 112.1 requests/second
-Failure Rate: 0%
-```
+| Users | Total Requests | Failures | RPS | Avg Latency | 95%ile Latency | Cart Instances | Product Instances |
+|-------|---------------|----------|-----|-------------|----------------|----------------|-------------------|
+| 300 | 4,995 | 0% | 77 | 2,029 ms | 3,600 ms | 4 | 1 |
+| 500 | 25,158 | 0% | 128.7 | 1,955 ms | 3,500 ms | 3 | 1 |
+| 1,000 | 78,910 | 0% | 275 | 3,310 ms | 5,900 ms | 3 | 1 |
+| 1,500 | 78,910 | 0% | 275 | 3,310 ms | 5,900 ms | 4 | 1 |
+| 2,000 (tuned) | 125,313 | **0.08%** | 244.1 | 5,383 ms | 19,000 ms | 5 | 3 |
 
-### 5.3 Results at 1500 Concurrent Users
+### 5.3 Autoscaling Tuning Process
 
-At 1500 users, the system became overloaded:
-- 502 Bad Gateway errors occurred
-- This indicates backend services could not handle the request volume
-- This condition triggers autoscaling
+Initial testing at 2,000 users with default 70% thresholds resulted in 10.8% failure rate. We iteratively tuned:
+
+| Phase | CPU Threshold | Failure Rate | Product Instances | Improvement |
+|-------|---------------|--------------|-------------------|-------------|
+| Initial (70%) | 70% | 10.8% | 1 (stuck) | Baseline |
+| Phase 1 (50%) | 50% | 3% | 2 (delayed) | 3.6x better |
+| Phase 2 (30%) | 30% | 0.08% | 3 (proactive) | **135x better** |
 
 ### 5.4 Latency Analysis
 
@@ -310,83 +309,71 @@ Latencies are higher due to intentional stacking of business logic delays:
 
 Two different metrics are used as required by the assignment:
 
+**Original Configuration:**
+
 | Service | Metric | Threshold | Min | Max |
 |---------|--------|-----------|-----|-----|
-| Product Service | CPU Utilization | 85% | 1 | 3 |
-| Shopping Cart Service | CPU + Memory (dual policy) | 50% each | 2 | 5 |
+| Product Service | CPU Utilization | 70% | 1 | 3 |
+| Shopping Cart Service | Memory Utilization | 70% | 1 | 5 |
 | Credit Card Authorizer | CPU Utilization | 70% | 1 | 3 |
 | Warehouse Service | Memory Utilization | 70% | 1 | 3 |
 
+**Tuned Configuration (after load testing):**
+
+| Service | Metric | Threshold | Min | Max | Changes |
+|---------|--------|-----------|-----|-----|---------|
+| Product Service | CPU Utilization | **30%** | 1 | 3 | 70% → 30% |
+| Shopping Cart Service | CPU + Memory | **50% / 50%** | **2** | 5 | Added dual-metric, min 1→2 |
+| Credit Card Authorizer | CPU Utilization | 70% | 1 | 3 | No change |
+| Warehouse Service | Memory Utilization | 70% | 1 | 3 | No change |
+
 **Tuning Notes:**
-- Shopping Cart uses **dual autoscaling policies** (CPU + Memory) because load testing revealed CPU spiked to ~100% while Memory stayed at ~37%. Memory alone wasn't triggering scaling fast enough.
-- Product Service threshold raised to 85% to use more capacity before scaling (was over-provisioned).
-- Shopping Cart threshold lowered to 50% with faster cooldowns (15s scale-out, 120s scale-in) to react faster to traffic spikes.
+- **Product Service**: Lowered threshold from 70% → 50% → 30% to enable proactive scaling before service becomes overwhelmed
+- **Shopping Cart Service**: Added dual autoscaling policies (CPU + Memory) because load testing revealed CPU spiked to ~100% while Memory stayed at ~37%. Increased minimum instances from 1 to 2 for better baseline capacity.
+- Health check grace period set to 60 seconds for all services to allow Spring Boot time to initialize.
 
-### 6.2 Load Test Configuration
+### 6.2 Final Results (After Tuning)
 
-| Parameter | Value |
-|-----------|-------|
-| Tool | Locust |
-| Concurrent Users | 2,000 |
-| Spawn Rate | 100 users/second |
-| Duration | 15 minutes |
-| Target | AWS ALB |
+| Metric | Before Tuning | After Tuning | Improvement |
+|--------|---------------|--------------|-------------|
+| Failure Rate | 10.8% | 0.08% | **135x better** |
+| Failed Requests | 10,281 | 99 | -99% |
+| 95th Percentile Latency | 33,000 ms | 19,000 ms | 42% faster |
+| Product Service Instances | 1 (stuck) | 3 (proactive) | 3x capacity |
+| Shopping Cart Instances | 1-2 | 5 (max) | Scaled to limit |
 
-### 6.3 Overload Condition - Actual Results
-
-| Metric | Value |
-|--------|-------|
-| Total Requests | 95,400 |
-| Failed Requests | 10,281 (~10.8%) |
-| Peak RPS | ~200 requests/sec |
-
-### 6.4 Service Scaling Status (Final)
+### 6.3 Service Scaling Status (Final - After Tuning)
 
 | Service | Initial Replicas | Final Replicas | Scaled? |
 |---------|------------------|----------------|---------|
-| shopping-cart-service | 1 | **5/5** | YES |
-| product-service | 1 | 1/1 | NO |
+| shopping-cart-service | 2 | **5/5** | YES |
+| product-service | 1 | **3/3** | YES |
 | credit-card-authorizer | 1 | 1/1 | NO |
 | warehouse-service | 1 | 1/1 | NO |
 | kv-database | 1 | 1/1 | NO |
 | leaderless-kv | 1 | 1/1 | NO |
 
-*Evidence: See `service tasks.png` screenshot showing ECS cluster with 7 Active services, 11 Running tasks*
+### 6.4 Bottleneck Analysis
 
-### 6.5 Scaling Timeline (from CloudWatch - Shopping_cart_health.png)
+The **shopping-cart-service** and **product-service** were identified as the primary bottlenecks because:
 
-- **~02:25** - shopping-cart-service: CPU spiked to ~100%, scaling triggered
-- **~02:30** - shopping-cart-service: scaled to ~4 replicas
-- **~02:35** - shopping-cart-service: scaled to 5 replicas (max capacity reached)
-
-### 6.6 Were All Systems Equally Scaled? **NO**
-
-Only the **shopping-cart-service** scaled up during the load test. This is expected behavior.
-
-### 6.7 Bottleneck Analysis
-
-The **shopping-cart-service** was identified as the primary bottleneck because:
-
-1. **Complex Transaction Orchestration**: Handles cart creation, item addition, and checkout with BEGIN/END/ABORT transaction semantics
-2. **Multi-Service Coordination**: Coordinates with KV database, Product service, Credit Card service, and RabbitMQ
-3. **Heavy State Management**: Maintains cart state across multiple operations
-4. **Synchronous Blocking**: Waits for responses from downstream services
+1. **Shopping Cart Service**: Orchestrates 4+ operations per request (KV read → Product Service validation → KV write → Credit Card → RabbitMQ)
+2. **Product Service**: Handles all product validation requests from Shopping Cart during Add Item operations
 
 Other services remained at 1 replica because:
-- **Product Service**: Simple read operations with fast response times (~1.2s avg)
 - **Credit Card Authorizer**: Lightweight validation with simulated delays
 - **Warehouse Service**: Asynchronous processing via RabbitMQ (fire-and-forget)
 
-### 6.8 Locust Test Results by Endpoint
+### 6.5 Final Locust Test Results by Endpoint (After Tuning)
 
-| Endpoint | Requests | Failures | Avg Latency | P99 Latency |
-|----------|----------|----------|-------------|-------------|
-| UC1.1 Create Cart | 16,407 | 2,867 (17%) | 11.2s | 45s |
-| UC1.2 Add Item | 36,959 | 6,178 (17%) | 14.2s | 52s |
-| UC1.3 Checkout | 11,990 | 1,235 (10%) | 14.8s | 55s |
-| UC2 View Product | 30,044 | 1 (0%) | 1.2s | 8s |
+| Endpoint | Requests | Failures | Avg Latency | 95%ile Latency |
+|----------|----------|----------|-------------|----------------|
+| UC1.1 Create Cart | 21,428 | 34 (0.16%) | 5,554 ms | 20,000 ms |
+| UC1.2 Add Item | 44,269 | 44 (0.10%) | 7,904 ms | 23,000 ms |
+| UC1.3 Checkout | 19,860 | 21 (0.11%) | 7,456 ms | 23,000 ms |
+| UC2 View Product | 39,756 | 0 (0%) | 1,448 ms | 2,100 ms |
 
-### 6.9 AWS CLI Commands for Evidence
+### 6.6 AWS CLI Commands for Evidence
 
 ```bash
 # 1. Service Scaling Status
@@ -414,7 +401,7 @@ aws application-autoscaling describe-scalable-targets \
   --output table
 ```
 
-### 6.10 Recommendations With Additional Budget
+### 6.7 Recommendations With Additional Budget
 
 | Priority | Improvement | Expected Impact |
 |----------|-------------|-----------------|
