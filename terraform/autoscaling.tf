@@ -157,7 +157,7 @@ output "autoscaling_configuration" {
   value = {
     product_service = {
       metric        = "CPU Utilization"
-      target        = "85%"
+      target        = "30%"
       min_instances = 1
       max_instances = 3
     }

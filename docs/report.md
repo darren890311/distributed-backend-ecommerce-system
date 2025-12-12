@@ -6,7 +6,7 @@
 
 ---
 
-## 1. System Architecture (10 points)
+## 1. System Architecture
 
 Our e-commerce system is designed as a distributed microservices architecture deployed on AWS ECS Fargate. The system handles two primary use cases: customer shopping sessions (create cart → add items → checkout) and product browsing. Each service is independently deployable and scalable, communicating via REST APIs and asynchronous messaging.
 
@@ -26,8 +26,8 @@ Our e-commerce system is designed as a distributed microservices architecture de
 The diagram shows the complete system architecture:
 - **Client/Locust** connects via the Internet to the Application Load Balancer (Port 80)
 - **ECS Fargate Cluster** hosts the microservices with autoscaling:
-  - Product Service (:8082) - CPU Autoscale 70%
-  - Shopping Cart Service (:8084) - Memory Autoscale 70%
+  - Product Service (:8082) - CPU Autoscale 30% (tuned)
+  - Shopping Cart Service (:8084) - CPU + Memory Autoscale 50%
   - Credit Card Authorizer (:8080) - CPU Autoscale 70%
   - Warehouse Service (:8083) - Memory Autoscale 70%
 - **Distributed KV Databases**:
@@ -79,7 +79,7 @@ The transaction stubs (begin/end/abort) demonstrate where 2PC would be implement
 
 ---
 
-## 2. Assumptions and Workload Analysis (10 points)
+## 2. Assumptions and Workload Analysis 
 
 Because real production traces are unavailable, we document reasonable assumptions aligned with industry patterns.
 
