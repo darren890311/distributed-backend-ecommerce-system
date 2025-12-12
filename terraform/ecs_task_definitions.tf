@@ -47,7 +47,7 @@ resource "aws_ecs_task_definition" "product_service" {
         # 5. Restart product-service
         {
           name  = "KVSTORE_LEADER_URL"
-          value = "http://172.31.4.29:8090"
+          value = "http://172.31.80.92:8090"
         }
       ]
 
@@ -177,7 +177,7 @@ resource "aws_ecs_task_definition" "shopping_cart_service" {
         # If IP changes, update this value and redeploy shopping-cart-service
         {
           name  = "KVSTORE_LEADER_URL"
-          value = "http://172.31.15.83:8080"
+          value = "http://172.31.8.47:8080"
         },
         # Warehouse Service URL - use ALB for stable DNS
         {

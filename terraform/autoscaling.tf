@@ -35,7 +35,9 @@ resource "aws_appautoscaling_policy" "product_service_cpu" {
 }
 
 # ============================================================================
-# SHOPPING CART SERVICE - Scale on Memory Utilization
+# SHOPPING CART SERVICE - Scale on BOTH CPU and Memory Utilization
+# Lesson learned: Memory alone wasn't triggering scaling fast enough.
+# CPU spiked to ~100% under load, so we added CPU-based scaling.
 # ============================================================================
 
 resource "aws_appautoscaling_target" "shopping_cart_service" {
@@ -48,6 +50,25 @@ resource "aws_appautoscaling_target" "shopping_cart_service" {
   depends_on = [aws_ecs_service.shopping_cart_service]
 }
 
+# Primary scaling policy: CPU Utilization (the actual bottleneck)
+resource "aws_appautoscaling_policy" "shopping_cart_service_cpu" {
+  name               = "shopping-cart-service-cpu-autoscaling"
+  policy_type        = "TargetTrackingScaling"
+  resource_id        = aws_appautoscaling_target.shopping_cart_service.resource_id
+  scalable_dimension = aws_appautoscaling_target.shopping_cart_service.scalable_dimension
+  service_namespace  = aws_appautoscaling_target.shopping_cart_service.service_namespace
+
+  target_tracking_scaling_policy_configuration {
+    predefined_metric_specification {
+      predefined_metric_type = "ECSServiceAverageCPUUtilization"
+    }
+    target_value       = 50.0 # Scale up when CPU > 50% (scale earlier for write-heavy)
+    scale_in_cooldown  = 120  # Wait 120s before scaling down (keep capacity longer)
+    scale_out_cooldown = 15   # Wait 15s before scaling up again (react faster)
+  }
+}
+
+# Secondary scaling policy: Memory Utilization (backup trigger)
 resource "aws_appautoscaling_policy" "shopping_cart_service_memory" {
   name               = "shopping-cart-service-memory-autoscaling"
   policy_type        = "TargetTrackingScaling"
@@ -141,8 +162,9 @@ output "autoscaling_configuration" {
       max_instances = 3
     }
     shopping_cart_service = {
-      metric        = "Memory Utilization"
-      target        = "50%"
+      metric        = "CPU + Memory Utilization (dual policy)"
+      cpu_target    = "50%"
+      memory_target = "50%"
       min_instances = 2
       max_instances = 5
     }

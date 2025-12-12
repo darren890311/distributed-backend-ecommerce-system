@@ -105,7 +105,7 @@ def on_locust_init(environment, **kwargs):
         return
 
     # Try loading from API
-    host = getattr(environment, 'host', None) or "http://ecommerce-alb-511228928.us-east-1.elb.amazonaws.com"
+    host = getattr(environment, 'host', None) or "http://ecommerce-alb-1186708136.us-east-1.elb.amazonaws.com"
     if load_products_from_api(host):
         return
 
@@ -317,4 +317,4 @@ class EcommerceCustomer(HttpUser):
     }
 
     # Target host (ALB endpoint)
-    host = "http://ecommerce-alb-511228928.us-east-1.elb.amazonaws.com"
+    host = "http://ecommerce-alb-1186708136.us-east-1.elb.amazonaws.com"
