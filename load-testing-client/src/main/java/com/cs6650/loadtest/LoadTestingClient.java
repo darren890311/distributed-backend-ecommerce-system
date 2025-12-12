@@ -110,8 +110,8 @@ public class LoadTestingClient {
     }
 
     // Export product IDs to JSON file for Locust load testing
-    // Write to parent directory (cs6650-assignment5/) where locustfile_aws.py is located
-    String jsonPath = "../products.json";
+    // Write to locust-load-testing directory where locustfile_aws.py is located
+    String jsonPath = "../locust-load-testing/products.json";
     try (java.io.PrintWriter jsonWriter = new java.io.PrintWriter(jsonPath)) {
       StringBuilder json = new StringBuilder();
       json.append("{\n  \"product_ids\": [");

@@ -37,8 +37,8 @@
 |   (port 8082)   |    |   Service       |    |  Authorizer     |
 |                 |    |   (port 8084)   |    |   (port 8080)   |
 | Auto-scale:     |    |                 |    |                 |
-| CPU 70%, max 3  |    | Auto-scale:     |    | Auto-scale:     |
-+---------+-------+    | Memory 70%,max 3|    | CPU 70%, max 3  |
+| CPU 85%, max 3  |    | Auto-scale:     |    | Auto-scale:     |
++---------+-------+    | CPU+Mem 50%,max5|    | CPU 70%, max 3  |
           |            +--------+--------+    +-----------------+
           |                     |
           |                     +------------------+
@@ -312,12 +312,15 @@ Two different metrics are used as required by the assignment:
 
 | Service | Metric | Threshold | Min | Max |
 |---------|--------|-----------|-----|-----|
-| Product Service | CPU Utilization | 70% | 1 | 3 |
-| Shopping Cart Service | CPU Utilization | 70% | 1 | 5 |
+| Product Service | CPU Utilization | 85% | 1 | 3 |
+| Shopping Cart Service | CPU + Memory (dual policy) | 50% each | 2 | 5 |
 | Credit Card Authorizer | CPU Utilization | 70% | 1 | 3 |
 | Warehouse Service | Memory Utilization | 70% | 1 | 3 |
 
-**Note:** Shopping Cart Service max capacity was increased from 3 to 5 during testing via AWS CLI to allow more scaling headroom.
+**Tuning Notes:**
+- Shopping Cart uses **dual autoscaling policies** (CPU + Memory) because load testing revealed CPU spiked to ~100% while Memory stayed at ~37%. Memory alone wasn't triggering scaling fast enough.
+- Product Service threshold raised to 85% to use more capacity before scaling (was over-provisioned).
+- Shopping Cart threshold lowered to 50% with faster cooldowns (15s scale-out, 120s scale-in) to react faster to traffic spikes.
 
 ### 6.2 Load Test Configuration
 

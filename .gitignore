@@ -90,3 +90,11 @@ load-testing-client/test-results/
 
 ### Logs ###
 *.log
+
+### Security ###
+# AWS private keys
+*.pem
+
+### Python ###
+__pycache__/
+*.pyc
