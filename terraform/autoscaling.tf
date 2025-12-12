@@ -28,7 +28,7 @@ resource "aws_appautoscaling_policy" "product_service_cpu" {
     predefined_metric_specification {
       predefined_metric_type = "ECSServiceAverageCPUUtilization"
     }
-    target_value       = 85.0 # Scale up when CPU > 85% (increased to let it use more capacity)
+    target_value       = 30.0 # Scale up when CPU > 30% (lowered to scale before overload)
     scale_in_cooldown  = 30   # Wait 30s before scaling down (faster scale-in)
     scale_out_cooldown = 60   # Wait 60s before scaling up again (slower scale-out)
   }
