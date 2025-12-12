@@ -8,6 +8,9 @@ resource "aws_ecs_service" "product_service" {
   desired_count   = 1
   launch_type     = "FARGATE"
 
+  # Allow Spring Boot time to start before health checks begin
+  health_check_grace_period_seconds = 60
+
   network_configuration {
     subnets          = var.public_subnet_ids
     security_groups  = [
@@ -65,8 +68,11 @@ resource "aws_ecs_service" "shopping_cart_service" {
   name            = "shopping-cart-service"
   cluster         = aws_ecs_cluster.main.id
   task_definition = aws_ecs_task_definition.shopping_cart_service.arn
-  desired_count   = 1
+  desired_count   = 2  # Increased from 1 for write-heavy workload
   launch_type     = "FARGATE"
+
+  # Allow Spring Boot time to start before health checks begin
+  health_check_grace_period_seconds = 60
 
   network_configuration {
     subnets          = var.public_subnet_ids
@@ -100,6 +106,9 @@ resource "aws_ecs_service" "credit_card_authorizer" {
   desired_count   = 1
   launch_type     = "FARGATE"
 
+  # Allow Spring Boot time to start before health checks begin
+  health_check_grace_period_seconds = 60
+
   network_configuration {
     subnets          = var.public_subnet_ids
     security_groups  = [
@@ -130,6 +139,9 @@ resource "aws_ecs_service" "warehouse_service" {
   task_definition = aws_ecs_task_definition.warehouse_service.arn
   desired_count   = 1
   launch_type     = "FARGATE"
+
+  # Allow Spring Boot time to start before health checks begin
+  health_check_grace_period_seconds = 60
 
   network_configuration {
     subnets          = var.public_subnet_ids

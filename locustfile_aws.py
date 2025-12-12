@@ -317,4 +317,4 @@ class EcommerceCustomer(HttpUser):
     }
 
     # Target host (ALB endpoint)
-    host = "http://ecommerce-alb-511228928.us-east-1.elb.amazonaws.com"
+    host = "http://ecommerce-alb-1186708136.us-east-1.elb.amazonaws.com"

@@ -28,19 +28,21 @@ resource "aws_appautoscaling_policy" "product_service_cpu" {
     predefined_metric_specification {
       predefined_metric_type = "ECSServiceAverageCPUUtilization"
     }
-    target_value       = 70.0 # Scale up when CPU > 70%
-    scale_in_cooldown  = 60   # Wait 60s before scaling down
-    scale_out_cooldown = 30   # Wait 30s before scaling up again
+    target_value       = 85.0 # Scale up when CPU > 85% (increased to let it use more capacity)
+    scale_in_cooldown  = 30   # Wait 30s before scaling down (faster scale-in)
+    scale_out_cooldown = 60   # Wait 60s before scaling up again (slower scale-out)
   }
 }
 
 # ============================================================================
-# SHOPPING CART SERVICE - Scale on Memory Utilization
+# SHOPPING CART SERVICE - Scale on BOTH CPU and Memory Utilization
+# Lesson learned: Memory alone wasn't triggering scaling fast enough.
+# CPU spiked to ~100% under load, so we added CPU-based scaling.
 # ============================================================================
 
 resource "aws_appautoscaling_target" "shopping_cart_service" {
-  max_capacity       = 3
-  min_capacity       = 1
+  max_capacity       = 5     # Increased from 3 for write-heavy workload
+  min_capacity       = 2     # Start with 2 instances to handle burst traffic
   resource_id        = "service/${aws_ecs_cluster.main.name}/${aws_ecs_service.shopping_cart_service.name}"
   scalable_dimension = "ecs:service:DesiredCount"
   service_namespace  = "ecs"
@@ -48,6 +50,25 @@ resource "aws_appautoscaling_target" "shopping_cart_service" {
   depends_on = [aws_ecs_service.shopping_cart_service]
 }
 
+# Primary scaling policy: CPU Utilization (the actual bottleneck)
+resource "aws_appautoscaling_policy" "shopping_cart_service_cpu" {
+  name               = "shopping-cart-service-cpu-autoscaling"
+  policy_type        = "TargetTrackingScaling"
+  resource_id        = aws_appautoscaling_target.shopping_cart_service.resource_id
+  scalable_dimension = aws_appautoscaling_target.shopping_cart_service.scalable_dimension
+  service_namespace  = aws_appautoscaling_target.shopping_cart_service.service_namespace
+
+  target_tracking_scaling_policy_configuration {
+    predefined_metric_specification {
+      predefined_metric_type = "ECSServiceAverageCPUUtilization"
+    }
+    target_value       = 50.0 # Scale up when CPU > 50% (scale earlier for write-heavy)
+    scale_in_cooldown  = 120  # Wait 120s before scaling down (keep capacity longer)
+    scale_out_cooldown = 15   # Wait 15s before scaling up again (react faster)
+  }
+}
+
+# Secondary scaling policy: Memory Utilization (backup trigger)
 resource "aws_appautoscaling_policy" "shopping_cart_service_memory" {
   name               = "shopping-cart-service-memory-autoscaling"
   policy_type        = "TargetTrackingScaling"
@@ -59,9 +80,9 @@ resource "aws_appautoscaling_policy" "shopping_cart_service_memory" {
     predefined_metric_specification {
       predefined_metric_type = "ECSServiceAverageMemoryUtilization"
     }
-    target_value       = 70.0 # Scale up when Memory > 70%
-    scale_in_cooldown  = 60   # Wait 60s before scaling down
-    scale_out_cooldown = 30   # Wait 30s before scaling up again
+    target_value       = 50.0 # Scale up when Memory > 50% (lowered to scale earlier)
+    scale_in_cooldown  = 120  # Wait 120s before scaling down (keep capacity longer)
+    scale_out_cooldown = 15   # Wait 15s before scaling up again (react faster)
   }
 }
 
@@ -136,15 +157,16 @@ output "autoscaling_configuration" {
   value = {
     product_service = {
       metric        = "CPU Utilization"
-      target        = "70%"
+      target        = "85%"
       min_instances = 1
       max_instances = 3
     }
     shopping_cart_service = {
-      metric        = "CPU Utilization"
-      target        = "70%"
-      min_instances = 1
-      max_instances = 3
+      metric        = "CPU + Memory Utilization (dual policy)"
+      cpu_target    = "50%"
+      memory_target = "50%"
+      min_instances = 2
+      max_instances = 5
     }
     credit_card_authorizer = {
       metric        = "CPU Utilization"
