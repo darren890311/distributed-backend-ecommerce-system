@@ -39,7 +39,9 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Configuration
-PRODUCTS_FILE = "products.json"  # Shared file with Java client
+# Get the directory where this script is located
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+PRODUCTS_FILE = os.path.join(SCRIPT_DIR, "products.json")  # Shared file with Java client
 DEFAULT_NUM_PRODUCTS = 1000  # Fallback if no products file
 
 # Global product list (loaded at startup)
