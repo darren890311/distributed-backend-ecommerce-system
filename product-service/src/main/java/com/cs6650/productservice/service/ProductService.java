@@ -2,7 +2,6 @@ package com.cs6650.productservice.service;
 
 import com.cs6650.productservice.kvclient.KvStoreClient;
 import com.cs6650.productservice.model.Product;
-// 刪除對 ProductRepository 和 ProductEntity 的引入，如果它們仍然存在的話
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
